@@ -16,6 +16,7 @@ import type {
 import {
   applyRating,
   cardDedupeKey,
+  cardHint,
   dueLabel,
   errorCard,
   freshSchedule,
@@ -41,7 +42,7 @@ function toView(row: CardRow, now = Date.now()): CardView {
     kind: (row.kind as CardView['kind']) ?? 'vocab',
     front: payload?.front ?? row.content,
     back: payload?.back ?? '',
-    hint: payload?.hint ?? null,
+    hint: payload ? cardHint(payload) ?? null : null,
     tag: payload?.tag ?? null,
     lessonId: row.lessonId,
     state: (row.state as CardView['state']) ?? 'new',

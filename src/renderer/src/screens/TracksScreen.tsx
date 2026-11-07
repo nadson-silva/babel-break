@@ -304,8 +304,14 @@ export function TracksScreen({
   }, [])
 
   async function create(replaceId?: number): Promise<void> {
-    const text = objective.trim() || view?.suggestions[0]?.objective || ''
-    if (!text) return
+    // Sem texto próprio não se gera nada: o app vinha caindo na primeira
+    // sugestão ("Entrevista para dev") e entregando uma trilha que o aluno
+    // não pediu.
+    const text = objective.trim()
+    if (!text) {
+      setError(t.tracks.createNeedsObjective)
+      return
+    }
 
     setBusy('create')
     setError(null)

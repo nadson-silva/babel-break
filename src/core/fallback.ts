@@ -1,6 +1,7 @@
 import type { CefrLevel } from '../shared/types'
 import type { ErrorFocusEntry } from './adapt'
 import { DEFAULT_LOCALE, type PromptLocale } from './prompts'
+import { clozeFromExample } from './srs'
 import { tokenize } from './languages'
 import { bankEntries } from './interference'
 import type { CurriculumOutput, ExerciseSetOutput, GeneratedExercise, LessonContentOutput } from './schemas'
@@ -142,6 +143,95 @@ export function fallbackCurriculum(level: CefrLevel, goal: string): CurriculumOu
   }
 }
 
+/**
+ * Conjunto de frases/vocabulário por nível para o conteúdo local. Sem isso a
+ * lição C1 caía no banco genérico de A2 ("I study English every day") — o
+ * aluno via pergunta e assunto muito abaixo do nível selecionado.
+ * As frases de exemplo sempre CONTÊM o termo, para o cloze determinístico.
+ */
+interface LevelExemplars {
+  examples: { target: string; native: string }[]
+  vocabulary: { term: string; translation: string; example: string }[]
+}
+
+const LEVEL_EXEMPLARS: Record<CefrLevel, LevelExemplars> = {
+  A1: {
+    examples: [
+      { target: 'I am Brazilian and I live in Recife.', native: 'Sou brasileiro e moro em Recife.' },
+      { target: 'She has two small cats.', native: 'Ela tem dois gatos pequenos.' },
+      { target: 'We eat bread for breakfast.', native: 'Nós comemos pão no café da manhã.' }
+    ],
+    vocabulary: [
+      { term: 'water', translation: 'água', example: 'I drink water every morning.' },
+      { term: 'family', translation: 'família', example: 'My family lives in Recife.' },
+      { term: 'friend', translation: 'amigo', example: 'She is my best friend.' },
+      { term: 'small', translation: 'pequeno', example: 'My city is small.' },
+      { term: 'eat', translation: 'comer', example: 'We eat bread for breakfast.' },
+      { term: 'work', translation: 'trabalhar', example: 'I work from home.' }
+    ]
+  },
+  A2: {
+    examples: [
+      { target: 'I study English every day.', native: 'Eu estudo inglês todos os dias.' },
+      { target: 'She works from home on Mondays.', native: 'Ela trabalha de casa às segundas.' },
+      { target: 'They like to practice together.', native: 'Eles gostam de praticar juntos.' }
+    ],
+    vocabulary: [
+      { term: 'study', translation: 'estudar', example: 'I study English.' },
+      { term: 'work', translation: 'trabalhar', example: 'She works from home.' },
+      { term: 'every day', translation: 'todos os dias', example: 'I practice every day.' },
+      { term: 'sometimes', translation: 'às vezes', example: 'Sometimes I listen to podcasts.' },
+      { term: 'because', translation: 'porque', example: 'I study because I want to improve.' },
+      { term: 'together', translation: 'juntos', example: 'We practice together.' }
+    ]
+  },
+  B1: {
+    examples: [
+      { target: 'I have already finished the report.', native: 'Eu já terminei o relatório.' },
+      { target: 'We were working when the power went out.', native: 'Estávamos trabalhando quando a luz caiu.' },
+      { target: 'Although it rained, we went out.', native: 'Embora tenha chovido, nós saímos.' }
+    ],
+    vocabulary: [
+      { term: 'already', translation: 'já', example: 'I have already seen that movie.' },
+      { term: 'although', translation: 'embora', example: 'Although it rained, we went out.' },
+      { term: 'however', translation: 'no entanto', example: 'It was tiring; however, I would do it again.' },
+      { term: 'experience', translation: 'experiência', example: 'I have a lot of experience with customers.' },
+      { term: 'improve', translation: 'melhorar', example: 'I read every night to improve my vocabulary.' },
+      { term: 'postpone', translation: 'adiar', example: 'The meeting was postponed to Friday.' }
+    ]
+  },
+  B2: {
+    examples: [
+      { target: 'The results were announced yesterday.', native: 'Os resultados foram anunciados ontem.' },
+      { target: 'She suggested taking a short break.', native: 'Ela sugeriu fazer uma pausa curta.' },
+      { target: 'They said they had already left.', native: 'Eles disseram que já haviam saído.' }
+    ],
+    vocabulary: [
+      { term: 'announced', translation: 'anunciado', example: 'The results were announced yesterday.' },
+      { term: 'despite', translation: 'apesar de', example: 'Despite the delay, we arrived on time.' },
+      { term: 'reliable', translation: 'confiável', example: 'He is a reliable source.' },
+      { term: 'suggest', translation: 'sugerir', example: 'She suggested taking a short break.' },
+      { term: 'hardly', translation: 'quase não', example: 'I had hardly arrived when they called.' },
+      { term: 'in advance', translation: 'com antecedência', example: 'You should book the flight in advance.' }
+    ]
+  },
+  C1: {
+    examples: [
+      { target: 'Not only did the team ship on time, but they also cut costs.', native: 'A equipe não apenas entregou no prazo, como também reduziu custos.' },
+      { target: 'Had we tested earlier, the bug would never have reached production.', native: 'Se tivéssemos testado antes, o bug jamais chegaria à produção.' },
+      { target: 'The proposal is, to some extent, a reasonable compromise.', native: 'A proposta é, até certo ponto, um acordo razoável.' }
+    ],
+    vocabulary: [
+      { term: 'nevertheless', translation: 'ainda assim', example: 'The plan was risky; nevertheless, we went ahead.' },
+      { term: 'to some extent', translation: 'até certo ponto', example: 'I agree with you to some extent.' },
+      { term: 'arguably', translation: 'discutivelmente', example: 'This is arguably the hardest part of the exam.' },
+      { term: 'not only', translation: 'não apenas', example: 'Not only did they arrive late, but they also left early.' },
+      { term: 'came up with', translation: 'criou, concebeu', example: 'We came up with a workaround overnight.' },
+      { term: 'needless to say', translation: 'dispensa dizer', example: 'Needless to say, the deal fell through.' }
+    ]
+  }
+}
+
 export function fallbackLessonContent(input: {
   title: string
   objective: string
@@ -150,11 +240,8 @@ export function fallbackLessonContent(input: {
   /** Vocabulário do domínio (trilha de foco) — substitui o conjunto genérico. */
   vocabulary?: { term: string; translation: string; example: string }[]
 }): LessonContentOutput {
-  const exampleSet = [
-    { target: 'I study English every day.', native: 'Eu estudo inglês todos os dias.' },
-    { target: 'She works from home on Mondays.', native: 'Ela trabalha de casa às segundas.' },
-    { target: 'They like to practice together.', native: 'Eles gostam de praticar juntos.' }
-  ]
+  const exemplars = LEVEL_EXEMPLARS[input.level] ?? LEVEL_EXEMPLARS.A2
+  const exampleSet = exemplars.examples
 
   const focus = input.errors ?? []
 
@@ -179,16 +266,7 @@ export function fallbackLessonContent(input: {
     ],
     pitfalls: focus.length > 0 ? pitfallsFrom(focus) : pitfallsFrom(bankEntries().slice(0, 2).map(toBankFocus)),
     vocabulary:
-      input.vocabulary && input.vocabulary.length > 0
-        ? input.vocabulary.slice(0, 10)
-        : [
-            { term: 'study', translation: 'estudar', example: 'I study English.' },
-            { term: 'work', translation: 'trabalhar', example: 'She works from home.' },
-            { term: 'every day', translation: 'todos os dias', example: 'I practice every day.' },
-            { term: 'sometimes', translation: 'às vezes', example: 'Sometimes I listen to podcasts.' },
-            { term: 'because', translation: 'porque', example: 'I study because I want to improve.' },
-            { term: 'together', translation: 'juntos', example: 'We practice together.' }
-          ]
+      input.vocabulary && input.vocabulary.length > 0 ? input.vocabulary.slice(0, 10) : exemplars.vocabulary
   }
 }
 
@@ -249,6 +327,23 @@ function missingWord(sentence: string): { prompt: string; answer: string } {
   return { prompt, answer }
 }
 
+/**
+ * Cloze a partir do vocabulário da lição: a tradução da palavra que falta vira
+ * dica entre parênteses, senão o aluno não tem como saber qual resposta a
+ * atividade espera (qualquer palavra sintática preencheria o vão).
+ */
+function vocabCloze(
+  vocabulary: LessonContentOutput['vocabulary'],
+  locale: PromptLocale
+): { prompt: string; answer: string } | null {
+  for (const item of vocabulary) {
+    const cloze = clozeFromExample(item.example, item.term, locale.target.tokenization)
+    if (!cloze) continue
+    return { prompt: `${cloze.blanked} (${item.translation})`, answer: cloze.matched }
+  }
+  return null
+}
+
 /** Reconstruir a frase certa é o drill determinístico do erro recorrente. */
 function orderFromFocus(entry: ErrorFocusEntry, locale: PromptLocale): GeneratedExercise {
   const sentence = entry.corrected.replace(/^["“]|["”]$/g, '').trim()
@@ -294,7 +389,7 @@ export function fallbackExercises(
   const focus = focusEntries(errors)
   const first = content.examples[0]
   const second = content.examples[1] ?? content.examples[0]
-  const cloze = missingWord(first.target)
+  const cloze = vocabCloze(content.vocabulary, locale) ?? missingWord(first.target)
   const orderTokens = tokenizeFor(second.target, locale.target.code)
 
   const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))])
@@ -314,7 +409,7 @@ export function fallbackExercises(
     },
     {
       type: 'cloze',
-      instruction: 'Complete a frase com a palavra que falta.',
+      instruction: 'Complete a frase com a palavra que falta; a tradução dela está entre parênteses.',
       prompt: cloze.prompt,
       options: [],
       tokens: [],

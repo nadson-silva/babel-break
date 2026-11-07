@@ -22,6 +22,7 @@ import type {
   UnitView
 } from '../shared/types'
 import type { ErrorFocusEntry } from '../core/adapt'
+import { clarifyCloze } from '../core/cloze'
 import { clampLevel, levelIndex, levelFromScore, CEFR_LEVELS } from '../core/cefr'
 import { fallbackCurriculum, fallbackExercises, fallbackLessonContent, pitfallsFrom } from '../core/fallback'
 import { deterministicContentSupported, tokenize } from '../core/languages'
@@ -506,6 +507,8 @@ async function ensureLessonGenerated(
 
     const resolved: LessonContentView = {
       ...generated,
+      // O nível é do currículo/trilha — um modelo fraco não rebaixa nem promove a lição.
+      level,
       pitfalls: generated.pitfalls ?? pitfallsFrom(focus),
       source
     }
@@ -607,9 +610,16 @@ async function ensureLessonGenerated(
 
     options = options.filter(Boolean)
 
+    // Cloze da IA sem dica de tradução = resposta adivinhável. Se a palavra
+    // esperada está no vocabulário da lição, a tradução entra no enunciado.
+    const promptText =
+      exercise.type === 'cloze' && source === 'ai'
+        ? clarifyCloze(exercise.prompt, answer, exerciseLevel.vocabulary)
+        : exercise.prompt
+
     const payload: ExercisePayload = {
       instruction: exercise.instruction,
-      prompt: exercise.prompt,
+      prompt: promptText,
       options,
       tokens,
       targetTags: exercise.targetTags ?? []

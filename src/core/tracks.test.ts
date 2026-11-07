@@ -259,6 +259,17 @@ describe('prompts das trilhas e do cenário', () => {
     expect(prompt.user).toContain('goalTag')
   })
 
+  it('o esboço nasce do tópico pedido, não do objetivo geral do perfil', () => {
+    // Objetivo de onboarding = entrevista; tópico digitado = viagem. O prompt
+    // não pode conter âncora que empurre o modelo fraco de volta para dev.
+    const prompt = trackPlanPrompt({ objective: 'viagem ao Japão', level: 'B1', goal: 'entrevista para dev', locale: DEFAULT_LOCALE })
+
+    expect(prompt.user).toContain('OBRIGATÓRIO')
+    expect(prompt.user).toContain('viagem ao Japão')
+    expect(prompt.user).toContain('ignore-o nesta trilha')
+    expect(prompt.user).not.toContain('Entrevista para dev')
+  })
+
   it('lição de trilha recebe palavras-alvo e trava de nível', () => {
     const lesson = lessonContentPrompt({
       title: 'Apresente-se em 60 segundos',
@@ -274,6 +285,8 @@ describe('prompts das trilhas e do cenário', () => {
     expect(lesson.user).toContain('trilha "Entrevista para dev"')
     expect(lesson.user).toContain('background, stack')
     expect(lesson.user).toContain('Restrição de nível: A2')
+    expect(lesson.user).toContain('Dificuldade TRAVADA no nível A2')
+    expect(lesson.user).toContain('deve ser exatamente "A2"')
 
     const exercises = exercisePrompt({
       content: fallbackLessonContent({ title: 'X', objective: 'y', level: 'A2' }),
@@ -286,6 +299,7 @@ describe('prompts das trilhas e do cenário', () => {
 
     expect(exercises.user).toContain('domínio "Entrevista para dev"')
     expect(exercises.user).toContain('Pelo menos 3 exercícios')
+    expect(exercises.user).toContain('Dificuldade TRAVADA no nível A2')
   })
 
   it('lição do currículo base não recebe restrição de trilha', () => {

@@ -275,6 +275,7 @@ export const ptBR = {
     createTitle: 'O que você quer praticar?',
     createPlaceholder: 'Ex.: entrevista para desenvolvedor backend',
     createCta: 'Gerar esboço',
+    createNeedsObjective: 'Escreva o que você quer praticar — o esboço nasce desse texto.',
     creating: 'Montando o esboço…',
     suggestions: 'Sugestões',
     draftTitle: 'Revisar o esboço',

@@ -280,6 +280,7 @@ export const en: Dictionary = {
     createTitle: 'What do you want to practice?',
     createPlaceholder: 'e.g.: backend developer job interview',
     createCta: 'Generate outline',
+    createNeedsObjective: 'Write what you want to practice — the outline grows from that text.',
     creating: 'Building the outline…',
     suggestions: 'Suggestions',
     draftTitle: 'Review the outline',

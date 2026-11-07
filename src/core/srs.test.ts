@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   applyRating,
   cardDedupeKey,
+  cardHint,
   freshSchedule,
   dueLabel,
   errorCard,
@@ -9,7 +10,8 @@ import {
   parseSchedule,
   previewIntervals,
   vocabCard,
-  phraseCard
+  phraseCard,
+  type CardPayload
 } from './srs'
 import { promptLocale } from './prompts'
 
@@ -21,6 +23,27 @@ describe('templates de card', () => {
     expect(card.back).toContain('deploy')
     expect(card.back).toContain('implantar')
     expect(card.lessonId).toBe(7)
+  })
+
+  it('o hint do cloze diz qual palavra a atividade espera', () => {
+    const card = vocabCard({ term: 'tricky', translation: 'delicada', example: 'It is a tricky situation for this scenario.' }, 1)
+    expect(card.front).toBe('It is a ___ situation for this scenario.')
+    expect(card.hint).toContain('delicada')
+  })
+
+  it('re-deriva o hint de cards de cloze gravados com instrução genérica', () => {
+    const legacy: CardPayload = {
+      kind: 'vocab',
+      front: 'It is a ___ situation for this scenario.',
+      back: 'tricky · delicada',
+      hint: 'Complete a frase com a palavra correta.',
+      translation: 'delicada'
+    }
+    expect(cardHint(legacy)).toContain('delicada')
+    // sem vão no frente, o hint original permanece
+    expect(cardHint({ ...legacy, front: 'tricky — delicada', hint: 'Diga o termo em inglês.' })).toBe(
+      'Diga o termo em inglês.'
+    )
   })
 
   it('cai para frente/traseiro quando o termo não está na frase', () => {

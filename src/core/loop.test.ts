@@ -60,6 +60,36 @@ describe('conteúdo determinístico adaptado ao caderno', () => {
       }
     }
   })
+
+  it('cloze do fallback traz a tradução da palavra como dica no enunciado', () => {
+    const exercises = fallbackExercises(content)
+    const cloze = exercises.exercises.find((exercise) => exercise.type === 'cloze')
+    expect(cloze).toBeDefined()
+    expect(cloze?.prompt).toContain('___')
+    // sem dica entre parênteses o aluno não tem como saber qual palavra esperar
+    expect(cloze?.prompt).toMatch(/\([^)]+\)/)
+    expect(cloze?.prompt.replace(/___/g, '')).not.toContain(cloze!.answer)
+  })
+
+  it('conteúdo local respeita o nível: C1 não recebe frases de A2', () => {
+    const c1 = fallbackLessonContent({
+      title: 'Discourse markers',
+      objective: 'organizar um discurso com marcadores naturais',
+      level: 'C1'
+    })
+
+    expect(c1.examples[0].target).not.toBe('I study English every day.')
+    expect(c1.vocabulary.map((item) => item.term)).toContain('nevertheless')
+    expect(c1.vocabulary.map((item) => item.term)).not.toContain('sometimes')
+
+    // e o exercício local de C1 sai do vocabulário avançado, com dica de tradução
+    const cloze = fallbackExercises(c1).exercises.find((exercise) => exercise.type === 'cloze')
+    expect(cloze?.prompt).toContain('___')
+    expect(cloze?.prompt).toContain('ainda assim')
+
+    const a2 = fallbackLessonContent({ title: 'X', objective: 'y', level: 'A2' })
+    expect(a2.vocabulary.map((item) => item.term)).toContain('study')
+  })
 })
 
 describe('prompts do loop', () => {

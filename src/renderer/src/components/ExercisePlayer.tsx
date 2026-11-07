@@ -286,7 +286,11 @@ export function ExercisePlayer({
           <div className={`text-xs font-semibold ${feedback.correct ? 'text-accent' : 'text-danger'}`}>
             {feedback.correct ? t.player.correct : t.player.incorrect}
           </div>
-          <p className="mt-1 leading-relaxed text-ink/90">{feedback.feedback}</p>
+          {/* A IA às vezes devolve só o veredito ("Correto!") — não duplicar o título. */}
+          {feedback.feedback.trim().toLowerCase() !==
+            (feedback.correct ? t.player.correct : t.player.incorrect).toLowerCase() && (
+            <p className="mt-1 leading-relaxed text-ink/90">{feedback.feedback}</p>
+          )}
           {feedback.corrected && feedback.corrected.trim() !== (isOrder ? picked.map((tokenIndex) => exercise.tokens[tokenIndex]).join(targetIsCjk() ? '' : ' ') : answer.trim()) && (
             <div className="mt-2 text-xs text-muted">
               <span className="text-faint">{t.player.expected}: </span>

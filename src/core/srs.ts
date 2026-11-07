@@ -45,20 +45,40 @@ export function vocabCard(
   lessonId?: number | null,
   locale: PromptLocale = DEFAULT_LOCALE
 ): CardPayload {
-  const blanked = blankTerm(item.example, item.term, locale.target.tokenization)
+  const cloze = clozeFromExample(item.example, item.term, locale.target.tokenization)
 
   return {
     kind: 'vocab',
-    front: blanked ?? `${item.term} — ${item.translation}`,
-    back: `${item.term} · ${item.translation}${blanked ? `\n${item.example}` : ''}`,
-    hint: blanked
-      ? 'Complete a frase com a palavra correta.'
-      : `Diga o termo em ${locale.targetName}.`,
+    front: cloze?.blanked ?? `${item.term} — ${item.translation}`,
+    back: `${item.term} · ${item.translation}${cloze ? `\n${item.example}` : ''}`,
+    hint: cloze ? clozeHint(item.translation) : `Diga o termo em ${locale.targetName}.`,
     term: item.term,
     translation: item.translation,
     example: item.example,
     lessonId
   }
+}
+
+/**
+ * Um cloze só é respondível se o aluno souber QUAL palavra a atividade espera —
+ * "It is a ___ situation" aceita dezenas de respostas. A dica de sempre é a
+ * tradução do termo.
+ */
+function clozeHint(translation: string): string {
+  return `Complete a frase com a palavra que significa “${translation}”.`
+}
+
+/**
+ * Hint na hora de exibir: cards de cloze antigos foram gravados com a instrução
+ * genérica ("complete com a palavra correta") e não dizem qual palavra esperam.
+ * Re-derivamos da tradução salva no payload para corrigir também a fila legada,
+ * sem migração de banco.
+ */
+export function cardHint(payload: CardPayload): string | undefined {
+  if (payload.kind === 'vocab' && payload.front.includes('___') && payload.translation) {
+    return clozeHint(payload.translation)
+  }
+  return payload.hint
 }
 
 export function phraseCard(
@@ -94,19 +114,33 @@ export function errorCard(
   }
 }
 
+export interface ClozeParts {
+  /** Frase de exemplo com o termo substituído por `___`. */
+  blanked: string
+  /** Texto exato que foi ocultado — é isso que o aluno deve escrever. */
+  matched: string
+}
+
 /**
- * Substitui o termo na frase de exemplo por ___ (cloze determinístico).
+ * Cloze determinístico a partir de uma frase de exemplo. Exportado para o
+ * fallback montar exercícios de completar já com a dica de tradução.
  * M4: fronteiras de palavra (`\b`) só fazem sentido em escrita separada por
  * espaço; para CJK o match é por substring (o segmentador cuida do resto).
  */
-function blankTerm(example: string, term: string, tokenization: 'space' | 'cjk' = 'space'): string | null {
+export function clozeFromExample(
+  example: string,
+  term: string,
+  tokenization: 'space' | 'cjk' = 'space'
+): ClozeParts | null {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
   const regex =
     tokenization === 'cjk'
       ? new RegExp(escaped, 'i')
       : new RegExp(`\\b${escaped}(s|es|ing|ed)?\\b`, 'i')
-  if (!regex.test(example)) return null
-  return example.replace(regex, '___')
+  const match = example.match(regex)
+  if (!match || match.index === undefined) return null
+
+  return { blanked: example.replace(regex, '___'), matched: match[0] }
 }
 
 export function cardDedupeKey(payload: CardPayload): string {
