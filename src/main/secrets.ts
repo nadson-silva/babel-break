@@ -35,7 +35,7 @@ function write(data: SecretsFile): void {
 }
 
 export async function getSecureStorageInfo(): Promise<SecureStorageInfo> {
-  let available = false
+  let available: boolean
   try {
     available = await safeStorage.isAsyncEncryptionAvailable()
   } catch {
@@ -62,7 +62,7 @@ export async function setGeminiApiKey(rawKey: string): Promise<void> {
   }
 
   const current = read()
-  let available = false
+  let available: boolean
   try {
     available = await safeStorage.isAsyncEncryptionAvailable()
   } catch {

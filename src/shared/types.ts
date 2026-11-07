@@ -93,6 +93,26 @@ export interface TutorSendRequest {
   text: string
 }
 
+/** Resultado da pré-condição de `tutor:send` (M6/B9) — eventos continuam no `ChatEvent`. */
+export interface TutorTurnResult {
+  ok: boolean
+  error?: string
+}
+
+/** M6 (C10): caminho do log rotativo do processo main, para relatório de bug. */
+export interface LogPathView {
+  path: string
+}
+
+/** M6 (C4): estado do banco no último boot — `recovered` aciona a tela de recuperação. */
+export interface DbStatusView {
+  ok: boolean
+  recovered: boolean
+  /** Arquivo `.db` corrompido posto de lado (com os irmãos WAL/SHM) — backup para investigação. */
+  backupPath: string | null
+  error: string | null
+}
+
 // --- Aprendizado (M1) -------------------------------------------------------
 
 export type CefrLevel = 'A1' | 'A2' | 'B1' | 'B2' | 'C1'

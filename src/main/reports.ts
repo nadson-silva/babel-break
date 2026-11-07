@@ -16,7 +16,7 @@
  * mesmo alvo — dois "esse exercício está errado" continuam valendo.
  */
 import { and, desc, eq, isNull, sql } from 'drizzle-orm'
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import type { ReportInput, ReportItemView, ReportsSummary } from '../shared/types'
 import type { ReportKind } from '../shared/report-reasons'
 import { effectFor, isReportKind, isReportReason, reasonFor, snapshotText } from '../core/reports'
@@ -252,9 +252,15 @@ export function submitReport(input: ReportInput): ReportItemView {
   return toView(row)
 }
 
-export function undoReport(reportId: number): ReportItemView | null {
+export function undoReport(reportId: number, profileId = getDefaultProfile().id): ReportItemView | null {
   const db = getDb()
-  const report = db.select().from(schema.contentReports).where(eq(schema.contentReports.id, reportId)).get()
+  // M6 (D2): o report só pode ser desfeito pelo próprio perfil — sem escopo,
+  // um report de outro perfil liberaria alheio.
+  const report = db
+    .select()
+    .from(schema.contentReports)
+    .where(and(eq(schema.contentReports.id, reportId), eq(schema.contentReports.profileId, profileId)))
+    .get()
   if (!report) return null
   if (report.undoneAt != null) return toView(report)
 
@@ -286,7 +292,7 @@ export function undoReport(reportId: number): ReportItemView | null {
  * Desfaz o report mais recente sobre um alvo (o caderno mostra "reativar correção"
  * sem conhecer o id do report).
  */
-export function undoReportForTarget(kind: ReportKind, targetId: number): ReportItemView | null {
+export function undoReportForTarget(kind: ReportKind, targetId: number, profileId = getDefaultProfile().id): ReportItemView | null {
   const row = getDb()
     .select({ id: schema.contentReports.id })
     .from(schema.contentReports)
@@ -294,6 +300,7 @@ export function undoReportForTarget(kind: ReportKind, targetId: number): ReportI
       and(
         eq(schema.contentReports.kind, kind),
         eq(schema.contentReports.targetId, targetId),
+        eq(schema.contentReports.profileId, profileId),
         isNull(schema.contentReports.undoneAt)
       )
     )
@@ -301,7 +308,7 @@ export function undoReportForTarget(kind: ReportKind, targetId: number): ReportI
     .limit(1)
     .get()
 
-  return row ? undoReport(row.id) : null
+  return row ? undoReport(row.id, profileId) : null
 }
 
 export function reportsSummary(profileId: number, limit = 12): ReportsSummary {
@@ -329,12 +336,12 @@ export function reportsSummary(profileId: number, limit = 12): ReportsSummary {
 }
 
 export function registerReportsIpc(): void {
-  ipcMain.handle('report:submit', (_event, input: ReportInput): ReportItemView => submitReport(input))
-  ipcMain.handle('report:undo', (_event, reportId: number) => undoReport(reportId))
-  ipcMain.handle('report:undo-target', (_event, kind: ReportKind, targetId: number) =>
+  handle('report:submit', (_event, input: ReportInput): ReportItemView => submitReport(input))
+  handle('report:undo', (_event, reportId: number) => undoReport(reportId))
+  handle('report:undo-target', (_event, kind: ReportKind, targetId: number) =>
     undoReportForTarget(kind, targetId)
   )
-  ipcMain.handle('report:list', (_event, limit?: number) =>
+  handle('report:list', (_event, limit?: number) =>
     reportsSummary(getDefaultProfile().id, limit)
   )
 }

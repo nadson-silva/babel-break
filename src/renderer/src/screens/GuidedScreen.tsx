@@ -126,6 +126,19 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
     }
   }
 
+  async function abandonSession(): Promise<void> {
+    // M6 (B3): "Encerrar sessão" encerra de verdade no banco — sem isto o
+    // handler `guided:abandon` existia sem nenhum call site na UI e a sessão
+    // ficava ativa para sempre (aparecia como "retomar" na home).
+    try {
+      await window.api.guided.abandon()
+    } catch (abandonError) {
+      setError(messageOf(abandonError))
+      return
+    }
+    onExit()
+  }
+
   const position = guidedStepPosition(step)
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
 
@@ -143,7 +156,7 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
         <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={onExit}
+            onClick={() => void abandonSession()}
             className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
           >
             {t.guided.abandon}

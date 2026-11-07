@@ -749,22 +749,62 @@ function recapMessage(
   return parts.filter(Boolean).join(' ')
 }
 
-/** Fechamento da conversa: recapitulação → cards + tags no caderno. */
-export function closeConversation(profileId: number, conversationId: number): RecapView {
+/** Extras que uma sessão guiada/cenário injeta na recapitulação do fechamento. */
+export interface RecapExtras {
+  reviewDone?: number
+  practice?: { correct: number; total: number }
+  scenario?: ScenarioFeedbackView | null
+}
+
+/**
+ * Fechamento da conversa: recapitulação → cards + tags no caderno.
+ *
+ * M6 (B2): o fechamento é **idempotente e escopado**. Quem chega depois do
+ * primeiro (`closedAt` já preenchido) recebe a recapitulação calculada sem
+ * reestimativa e sem recriar cards — uma abertura gera um recap, não dois. E o
+ * encerramento de `study_sessions` filtra pelo `conversationId` gravado no
+ * resumo de abertura: fechar a conversa A não toca mais nas sessões de B.
+ */
+export function closeConversation(
+  profileId: number,
+  conversationId: number,
+  extra: RecapExtras = {}
+): RecapView {
+  const db = getDb()
   const corrections = messagesOf(conversationId).flatMap((row) => parseCorrections(row.corrections))
-  const recap = buildRecap(profileId, corrections)
   const now = Date.now()
 
-  getDb()
-    .update(schema.conversations)
+  const conversation = db
+    .select()
+    .from(schema.conversations)
+    .where(and(eq(schema.conversations.id, conversationId), eq(schema.conversations.profileId, profileId)))
+    .get()
+
+  if (!conversation || conversation.closedAt != null) {
+    // Recado do segundo fechamento (ou de outra profile): refaz a leitura, não
+    // refaz o efeito (nenhuma reestimativa, nenhum card novo).
+    return {
+      corrections,
+      tags: tagsOf(corrections),
+      cardsCreated: 0,
+      reviewDone: extra.reviewDone,
+      practice: extra.practice,
+      levelChange: null,
+      scenario: extra.scenario ?? null,
+      message: recapMessage(corrections, 0, null, extra.scenario ?? null, profileNativeLang())
+    }
+  }
+
+  const recap = buildRecap(profileId, corrections, extra)
+
+  db.update(schema.conversations)
     .set({ closedAt: now })
-    .where(eq(schema.conversations.id, conversationId))
+    .where(and(eq(schema.conversations.id, conversationId), isNull(schema.conversations.closedAt)))
     .run()
 
   emitStudentEvent('conversation-closed', String(conversationId))
 
-  getDb()
-    .update(schema.studySessions)
+  db.update(schema.studySessions)
     .set({
       endedAt: now,
       summary: JSON.stringify({
@@ -778,7 +818,8 @@ export function closeConversation(profileId: number, conversationId: number): Re
       and(
         eq(schema.studySessions.profileId, profileId),
         eq(schema.studySessions.kind, 'conversation'),
-        isNull(schema.studySessions.endedAt)
+        isNull(schema.studySessions.endedAt),
+        sql`json_extract(${schema.studySessions.summary}, '$.conversationId') = ${conversationId}`
       )
     )
     .run()

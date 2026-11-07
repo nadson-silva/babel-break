@@ -8,6 +8,13 @@
   "author": "nadson",
   "license": "MIT",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nadson-silva/babel-break.git"
+  },
+  "bugs": {
+    "url": "https://github.com/nadson-silva/babel-break/issues"
+  },
   "engines": {
     "node": ">=20.19"
   },
@@ -21,8 +28,10 @@
     "start": "electron .",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "eval": "node scripts/eval.mjs",
     "db:generate": "drizzle-kit generate",
     "icons": "rsvg-convert -w 512 -h 512 build/icon.svg -o build/icon.png && for s in 16 24 32 48 64 128 256 512; do rsvg-convert -w ${s} -h ${s} build/icon.svg -o build/icons/${s}x${s}.png; done"
   },
@@ -34,7 +43,10 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.5",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.6",
     "@types/react": "^19.3.0",
@@ -44,10 +56,15 @@
     "electron": "^45.2.3",
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
+    "eslint": "^10.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.14.0",
+    "jsdom": "^31.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tailwindcss": "^4.3.5",
     "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6",
     "vitest": "^5.1.0"
   },

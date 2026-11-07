@@ -1,6 +1,8 @@
-import { app, ipcMain } from 'electron'
+import { app } from 'electron'
+import { handle } from './ipc-contract'
 import type { AppSettings, LanguageOption, ProviderId, SettingsPayload, TestResult } from '../shared/types'
 import { LANGUAGES } from '../core/languages'
+import { getDbStatus } from './db'
 import { registerDashboardIpc } from './dashboard'
 import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
@@ -11,6 +13,7 @@ import { refreshProviderStatus } from './provider-status'
 import { registerScenarioIpc } from './scenario'
 import { registerTracksIpc } from './tracks'
 import { emitStudentEvent } from './events'
+import { logFilePath } from './log'
 import { getProvider } from './providers'
 import {
   clearGeminiApiKey,
@@ -39,14 +42,20 @@ function errorMessage(error: unknown): string {
 }
 
 export function registerIpcHandlers(): void {
-  ipcMain.handle('app:info', () => ({
+  handle('app:info', () => ({
     version: app.getVersion(),
     name: app.getName()
   }))
 
+  // M6 (C10): o renderer pede o caminho do log para "reportar bug" ter o que anexar.
+  handle('log:get-path', (): { path: string } => ({ path: logFilePath() ?? '' }))
+
+  // M6 (C4): a tela de recuperação lê o estado do banco do último boot.
+  handle('db:status', () => getDbStatus())
+
   // M4: o renderer não importa `core/` (são dois projetos TS) — o registro de
   // idiomas cruza a ponte como dado de exibição para os seletores de idioma.
-  ipcMain.handle('languages:list', (): LanguageOption[] =>
+  handle('languages:list', (): LanguageOption[] =>
     LANGUAGES.map(({ code, name, nativeName, promptName, scriptDirection, tokenization }) => ({
       code,
       name,
@@ -57,9 +66,9 @@ export function registerIpcHandlers(): void {
     }))
   )
 
-  ipcMain.handle('settings:get', () => settingsPayload())
+  handle('settings:get', () => settingsPayload())
 
-  ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>) => {
+  handle('settings:update', async (_event, patch: Partial<AppSettings>) => {
     updateSettings(patch)
     // M5: mexer em provedor/peso de foco muda o que vale a pena aquecer.
     emitStudentEvent('settings-saved')
@@ -68,24 +77,24 @@ export function registerIpcHandlers(): void {
 
   // M5: estado de disponibilidade da IA — o que faz a UI dizer "offline" com
   // precisão (Ollama local continua "online" sem internet).
-  ipcMain.handle('provider:status', () => refreshProviderStatus())
-  ipcMain.handle('provider:probe', () => refreshProviderStatus({ force: true, announce: true }))
+  handle('provider:status', () => refreshProviderStatus())
+  handle('provider:probe', () => refreshProviderStatus({ force: true, announce: true }))
 
-  ipcMain.handle('settings:set-gemini-key', async (_event, key: string) => {
+  handle('settings:set-gemini-key', async (_event, key: string) => {
     await setGeminiApiKey(key)
     return settingsPayload()
   })
 
-  ipcMain.handle('settings:clear-gemini-key', () => {
+  handle('settings:clear-gemini-key', () => {
     clearGeminiApiKey()
     return settingsPayload()
   })
 
-  ipcMain.handle('models:list', async (_event, providerId: ProviderId) => {
+  handle('models:list', async (_event, providerId: ProviderId) => {
     return getProvider(providerId).listModels()
   })
 
-  ipcMain.handle('provider:test', async (_event, providerId: ProviderId): Promise<TestResult> => {
+  handle('provider:test', async (_event, providerId: ProviderId): Promise<TestResult> => {
     const startedAt = performance.now()
     const settings = getSettings()
     const model = providerId === 'gemini' ? settings.geminiModel : settings.ollamaModel

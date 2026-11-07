@@ -1,7 +1,16 @@
 export const ptBR = {
   app: {
     name: 'Language Teacher',
-    tagline: 'Tutor de idiomas, no seu ritmo'
+    tagline: 'Tutor de idiomas, no seu ritmo',
+    recoveredTitle: 'Recuperamos o banco de dados',
+    recoveredBody:
+      'O banco anterior estava corrompido (ou uma migração falhou) e foi aberto um novo para o app não travar na tela de carregamento. O arquivo danificado ficou em backup para investigação.',
+    recoveredBackup: 'Backup: {path}',
+    recoveredDismiss: 'Entendi, continuar',
+    crashTitle: 'Algo quebrou nesta tela',
+    crashBody: 'O erro foi registrado no log do app. Você pode voltar ao início sem fechar o programa.',
+    crashLog: 'Caminho do log: {path}',
+    crashReload: 'Voltar ao início'
   },
   languages: {
     targetTitle: 'Qual idioma você quer aprender?',

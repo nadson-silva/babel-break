@@ -175,7 +175,18 @@ export function TutorPanel({
     setStreaming(requestId)
 
     try {
-      await window.api.tutor.send({ requestId, conversationId, text })
+      const result = await window.api.tutor.send({ requestId, conversationId, text })
+      // M6 (B9): pré-condição recusada (sem conversa/texto/modelo) → nenhum
+      // evento `chat:event` vai chegar; o bubble "Pensando…" precisa morrer aqui.
+      if (result && !result.ok) {
+        setMessages((previous) =>
+          previous.map((entry) =>
+            entry.id === requestId && entry.pending
+              ? { ...entry, content: result.error ?? 'Falha ao enviar a mensagem.', pending: false, error: true }
+              : entry
+          )
+        )
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       setMessages((previous) =>

@@ -2,7 +2,8 @@
  * IPC do loop (M2): tutor, caderno de erros, revisão SRS e sessão guiada.
  * Toda chamada de IA continua no processo main; o renderer só vê eventos.
  */
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { type IpcMainInvokeEvent } from 'electron'
+import { handle } from './ipc-contract'
 import type {
   ChatEvent,
   GuidedStep,
@@ -48,70 +49,72 @@ function emit(event: IpcMainInvokeEvent, payload: ChatEvent): void {
 
 export function registerLoopIpc(): void {
   // --- Tutor ---------------------------------------------------------------
-  ipcMain.handle('tutor:list', () => listConversations(profileId()))
+  handle('tutor:list', () => listConversations(profileId()))
 
-  ipcMain.handle('tutor:latest', () => latestConversation(profileId()))
+  handle('tutor:latest', () => latestConversation(profileId()))
 
-  ipcMain.handle('tutor:open', (_event, conversationId: number) =>
+  handle('tutor:open', (_event, conversationId: number) =>
     openConversationView(profileId(), conversationId)
   )
 
-  ipcMain.handle(
+  handle(
     'tutor:new',
     (_event, input: { topic?: string | null; lessonId?: number | null } = {}) =>
       createConversation(profileId(), input)
   )
 
-  ipcMain.handle('tutor:send', async (event, request: TutorSendRequest) => {
-    await sendTurn(profileId(), request, (payload) => emit(event, payload))
+  handle('tutor:send', async (event, request: TutorSendRequest) => {
+    // M6 (B9): o resultado de pré-condição ({ok,error}) desce até o renderer —
+    // sem isto a falha silenciosa deixava o bubble "Pensando…" para sempre.
+    return sendTurn(profileId(), request, (payload) => emit(event, payload))
   })
 
-  ipcMain.handle('tutor:cancel', (_event, requestId: string) => cancelTurn(requestId))
+  handle('tutor:cancel', (_event, requestId: string) => cancelTurn(requestId))
 
-  ipcMain.handle('tutor:close', (_event, conversationId: number): RecapView =>
+  handle('tutor:close', (_event, conversationId: number): RecapView =>
     closeConversation(profileId(), conversationId)
   )
 
   // --- Caderno de erros ----------------------------------------------------
-  ipcMain.handle('notebook:get', (): NotebookView => notebookView(profileId()))
+  handle('notebook:get', (): NotebookView => notebookView(profileId()))
 
-  ipcMain.handle('notebook:resolve', (_event, errorId: number, resolved: boolean) =>
+  handle('notebook:resolve', (_event, errorId: number, resolved: boolean) =>
     setErrorResolved(errorId, resolved)
   )
 
-  ipcMain.handle('notebook:resolve-tag', (_event, tags: string[]) => resolveTagErrors(profileId(), tags))
+  handle('notebook:resolve-tag', (_event, tags: string[]) => resolveTagErrors(profileId(), tags))
 
   // --- Revisão SRS ---------------------------------------------------------
-  ipcMain.handle('review:state', (_event, limit?: number): ReviewState => reviewState(profileId(), limit ?? 20))
+  handle('review:state', (_event, limit?: number): ReviewState => reviewState(profileId(), limit ?? 20))
 
-  ipcMain.handle(
+  handle(
     'review:answer',
     (_event, input: { cardId: number; rating: ReviewRating }): ReviewResult =>
       answerReview(profileId(), input.cardId, input.rating)
   )
 
-  ipcMain.handle('review:from-errors', () => cardsForRecurringErrors(profileId(), 8))
+  handle('review:from-errors', () => cardsForRecurringErrors(profileId(), 8))
 
   // --- Sessão guiada -------------------------------------------------------
-  ipcMain.handle('guided:active', () => activeGuidedSession(profileId()))
+  handle('guided:active', () => activeGuidedSession(profileId()))
 
-  ipcMain.handle('guided:start', async () => startGuidedSession(profileId()))
+  handle('guided:start', async () => startGuidedSession(profileId()))
 
-  ipcMain.handle('guided:step', (_event, step: GuidedStep) => advanceGuidedSession(profileId(), step))
+  handle('guided:step', (_event, step: GuidedStep) => advanceGuidedSession(profileId(), step))
 
-  ipcMain.handle('guided:review-count', (_event, done: number) => recordGuidedReview(profileId(), done))
+  handle('guided:review-count', (_event, done: number) => recordGuidedReview(profileId(), done))
 
-  ipcMain.handle('guided:practice', (_event, practice: { correct: number; total: number }) =>
+  handle('guided:practice', (_event, practice: { correct: number; total: number }) =>
     recordGuidedPractice(profileId(), practice)
   )
 
-  ipcMain.handle('guided:tutor', async () => ensureGuidedConversation(profileId()))
+  handle('guided:tutor', async () => ensureGuidedConversation(profileId()))
 
-  ipcMain.handle(
+  handle(
     'guided:finish',
     (_event, input: { reviewDone?: number; practice?: { correct: number; total: number } } = {}) =>
       finishGuidedSession(profileId(), input)
   )
 
-  ipcMain.handle('guided:abandon', () => abandonGuidedSession(profileId()))
+  handle('guided:abandon', () => abandonGuidedSession(profileId()))
 }

@@ -113,7 +113,6 @@ export function SettingsScreen({
     void loadModels('gemini')
     void loadModels('ollama')
     void loadCache()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   async function loadCache(): Promise<void> {

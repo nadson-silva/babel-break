@@ -5,6 +5,11 @@ import { t } from '../i18n'
 import { targetLanguage } from '../lang'
 
 interface ReviewQueueProps {
+  /**
+   * Fila de cards pendentes. Fonte única de verdade (M6/B1): responder um
+   * card exige que o pai o remova do array (ou recarregue a lista) — o
+   * componente sempre mostra o primeiro.
+   */
   cards: CardView[]
   onAnswer: (cardId: number, rating: ReviewRating) => void | Promise<void>
   /** Chamado quando o aluno decide parar antes do fim da fila. */
@@ -51,12 +56,15 @@ function kindLabel(kind: CardView['kind']): string {
 }
 
 export function ReviewQueue({ cards, onAnswer, onSkip, skipLabel, dense }: ReviewQueueProps): JSX.Element {
-  const [index, setIndex] = useState(0)
   const [revealed, setRevealed] = useState(false)
   const [busy, setBusy] = useState(false)
 
-  const card = cards[index]
-  const remaining = cards.length - index
+  // M6 (B1): a fila não mantém índice próprio — o card exibido é sempre o
+  // primeiro do array, e quem avança a fila é o pai (ao remover o card
+  // respondido ou recarregar a lista). Antes os dois avançavam ao mesmo
+  // tempo e um card era pulado a cada resposta.
+  const card = cards[0]
+  const remaining = cards.length
 
   const intervalByRating = useMemo(() => {
     const map = new Map<ReviewRating, string>()
@@ -70,7 +78,6 @@ export function ReviewQueue({ cards, onAnswer, onSkip, skipLabel, dense }: Revie
     try {
       await onAnswer(card.id, rating)
       setRevealed(false)
-      setIndex((value) => value + 1)
     } finally {
       setBusy(false)
     }

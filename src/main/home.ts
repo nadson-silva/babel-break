@@ -7,7 +7,7 @@
  * base ou lição da trilha?"), não uma cota diária. Quem só quer conversar não
  * recebe lição nenhuma.
  */
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import { desc, eq } from 'drizzle-orm'
 import type { HomeState, LessonSummary, NextSuggestion } from '../shared/types'
 import { pickRecommendationOrigin } from '../core/tracks'
@@ -108,5 +108,5 @@ export function homeState(): HomeState {
 }
 
 export function registerHomeIpc(): void {
-  ipcMain.handle('home:get', () => homeState())
+  handle('home:get', () => homeState())
 }

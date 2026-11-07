@@ -12,7 +12,7 @@
  *    impede "soa fluente, não respondeu nada" de tirar nota boa — e torna a
  *    avaliação muito menos subjetiva que uma nota 1–10.
  */
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import type {
   ConversationMode,
@@ -483,17 +483,17 @@ export async function refreshLessonScenario(lessonId: number): Promise<ScenarioV
 export function registerScenarioIpc(): void {
   const profileId = (): number => getDefaultProfile().id
 
-  ipcMain.handle('scenario:open', (_event, input: { lessonId?: number | null; topic?: string | null }) =>
+  handle('scenario:open', (_event, input: { lessonId?: number | null; topic?: string | null }) =>
     startScenarioRun(profileId(), input)
   )
 
-  ipcMain.handle('scenario:finish', (_event, conversationId: number) => finishScenarioRun(profileId(), conversationId))
+  handle('scenario:finish', (_event, conversationId: number) => finishScenarioRun(profileId(), conversationId))
 
-  ipcMain.handle('scenario:session', (_event, conversationId: number) =>
+  handle('scenario:session', (_event, conversationId: number) =>
     scenarioSessionView(profileId(), conversationId)
   )
 
-  ipcMain.handle('scenario:runs', (_event, limit?: number) => scenarioRuns(profileId(), limit ?? 10))
+  handle('scenario:runs', (_event, limit?: number) => scenarioRuns(profileId(), limit ?? 10))
 
-  ipcMain.handle('scenario:refresh', (_event, lessonId: number) => refreshLessonScenario(lessonId))
+  handle('scenario:refresh', (_event, lessonId: number) => refreshLessonScenario(lessonId))
 }

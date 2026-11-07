@@ -39,12 +39,21 @@ import type {
   TestResult,
   TrackPlanLesson,
   TracksView,
-  TutorSendRequest
+  TutorSendRequest,
+  TutorTurnResult,
+  DbStatusView,
+  LogPathView
 } from '../shared/types'
 
 declare global {
   interface Window {
     api: {
+      /** M6: diagnóstico — versão, log rotativo e estado do banco no boot. */
+      app: {
+        info(): Promise<{ version: string; name: string }>
+        logPath(): Promise<LogPathView>
+        dbStatus(): Promise<DbStatusView>
+      }
       settings: {
         get(): Promise<SettingsPayload>
         update(patch: Partial<AppSettings>): Promise<SettingsPayload>
@@ -73,7 +82,7 @@ declare global {
         latest(): Promise<ConversationSummary | null>
         open(conversationId: number): Promise<ConversationView>
         create(input?: { topic?: string | null; lessonId?: number | null }): Promise<ConversationView>
-        send(request: TutorSendRequest): Promise<void>
+        send(request: TutorSendRequest): Promise<TutorTurnResult>
         cancel(requestId: string): Promise<void>
         close(conversationId: number): Promise<RecapView>
       }

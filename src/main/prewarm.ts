@@ -19,7 +19,8 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, ipcMain } from 'electron'
+import { app } from 'electron'
+import { handle } from './ipc-contract'
 import { and, eq, sql } from 'drizzle-orm'
 import type { CacheStats, PrewarmCycleOutcome, PrewarmOutcome, PrewarmState } from '../shared/types'
 import { aiInFlight } from './ai'
@@ -337,9 +338,9 @@ export function startPrewarmWatch(): void {
 }
 
 export function registerPrewarmIpc(): void {
-  ipcMain.handle('pregen:state', (): PrewarmState => prewarmState())
-  ipcMain.handle('pregen:run', () => runPrewarmCycle())
-  ipcMain.handle('cache:stats', (): CacheStats => cacheStats())
+  handle('pregen:state', (): PrewarmState => prewarmState())
+  handle('pregen:run', () => runPrewarmCycle())
+  handle('cache:stats', (): CacheStats => cacheStats())
 }
 
 /** Só para teste: estado interno limpo entre casos. */

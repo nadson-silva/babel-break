@@ -14,7 +14,7 @@
  * linhas no SQLite e monta o payload.
  */
 import { and, desc, eq, or, sql } from 'drizzle-orm'
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import type {
   DashboardTrack,
   DashboardView,
@@ -337,5 +337,5 @@ export function dashboardView(now = Date.now()): DashboardView {
 }
 
 export function registerDashboardIpc(): void {
-  ipcMain.handle('dashboard:get', (): DashboardView => dashboardView())
+  handle('dashboard:get', (): DashboardView => dashboardView())
 }

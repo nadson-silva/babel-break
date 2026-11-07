@@ -1,0 +1,27 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  quality:
+    name: lint + typecheck + testes
+    runs-on: ubuntu-latest
+    env:
+      # O binário do Electron não é necessário: os testes rodam contra o stub.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      # M6 (F1/F2): eval com gate de regressão — modo offline usa o harness
+      # determinístico e sai com código != 0 se a taxa de JSON/limpeza regredir.
+      - run: npm run eval -- --offline

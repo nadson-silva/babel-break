@@ -321,25 +321,28 @@ leitura tolerante de JSON, e a degradação honesta para idioma ≠ inglês.
 
 ### Lote 0 — rede de proteção (barato, destrava o resto)
 
-- [ ] **B1** fila de revisão pula cards: `ReviewQueue.tsx:73` avança o índice e os 4 pais
+- [x] **B1** fila de revisão pula cards: `ReviewQueue.tsx:73` avança o índice e os 4 pais
       (`ReviewScreen.tsx:46-53`, `LessonScreen.tsx:58-65`, `TutorScreen.tsx:112-118`,
       `GuidedScreen.tsx:94-102`) também removem o card do array — um dos dois tem que ceder. Um
       teste da interação (jsdom) — hoje nenhum `.tsx` é testável (`vitest.config.mts`).
-- [ ] **B2** `closeConversation` filtra por `conversationId` (`tutor.ts:766-784`) e guarda
+- [x] **B2** `closeConversation` filtra por `conversationId` (`tutor.ts:766-784`) e guarda
       `closedAt IS NULL`; sem dupla reestimativa em `scenario.ts:431` + `guided.ts:356`.
-- [ ] **B3** "Encerrar sessão" chama `guided:abandon` (`GuidedScreen.tsx:149` só renderiza o
+- [x] **B3** "Encerrar sessão" chama `guided:abandon` (`GuidedScreen.tsx:149` só renderiza o
       rótulo; `loop.ts:116` tem o handler sem call site na UI).
-- [ ] **C4** `whenReady().catch` + backup do `.db*` antes da migração + `integrity_check` +
+- [x] **C4** `whenReady().catch` + backup do `.db*` antes da migração + `integrity_check` +
       handlers de `unhandledRejection`/`uncaughtException` (`index.ts:67-81`).
-- [ ] **C10** log rotativo em `main.log` (userData) + canal `log:get-path`; bug report da v2
+- [x] **C10** log rotativo em `main.log` (userData) + canal `log:get-path`; bug report da v2
       precisa ter o que investigar (hoje: 14 `console.warn` para o nada de um AppImage).
-- [ ] **E1** um `ErrorBoundary` envolvendo a área de telas — há non-null assertions vivas
+- [x] **E1** um `ErrorBoundary` envolvendo a área de telas — há non-null assertions vivas
       (`HomeScreen.tsx:250,270,295,330`, `LessonScreen.tsx:171`) em app de janela única.
-- [ ] **D2** envelope `{ok,data} | {ok,error}` único + zod nos **57** canais (a validação já é o
+- [x] **D2** envelope `{ok,data} | {ok,error}` único + zod nos **57** canais (a validação já é o
       pré-requisito de múltiplos perfis: `reports.ts:257` e `learning.ts:961-967` não escopam).
-- [ ] **B9** `tutor:send` checa `result.ok` — hoje falha de pré-condição deixa "Pensando…" eterno
+      Feito: `ipc-contract.ts` cobre os 57 canais com recusa antes de persistir + escopo de
+      perfil em undo de reports e `lesson:answer`; o envelope único adia para junto de
+      `profile:create` (mudar as 57 assinaturas de retorno sem multi-perfil só gera churn).
+- [x] **B9** `tutor:send` checa `result.ok` — hoje falha de pré-condição deixa "Pensando…" eterno
       (`tutor.ts:455-461`, `loop.ts:65-67`, `TutorPanel.tsx:177-191`).
-- [ ] **F3/F7** CI (typecheck + vitest), LICENSE, CHANGELOG, `repository:` no package.json.
+- [x] **F3/F7** CI (typecheck + vitest), LICENSE, CHANGELOG, `repository:` no package.json.
 
 ### Lote 1 — consertar o loop e parar de queimar API
 

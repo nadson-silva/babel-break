@@ -7,7 +7,16 @@ import type { Dictionary } from './index'
 export const en: Dictionary = {
   app: {
     name: 'Language Teacher',
-    tagline: 'A language tutor, at your pace'
+    tagline: 'A language tutor, at your pace',
+    recoveredTitle: 'We recovered the database',
+    recoveredBody:
+      'The previous database was corrupted (or a migration failed), so a fresh one was opened to keep the app from hanging on the loading screen. The damaged file was kept as a backup for investigation.',
+    recoveredBackup: 'Backup: {path}',
+    recoveredDismiss: 'Got it, continue',
+    crashTitle: 'Something broke on this screen',
+    crashBody: 'The error was written to the app log. You can get back home without closing the program.',
+    crashLog: 'Log path: {path}',
+    crashReload: 'Back to home'
   },
   languages: {
     targetTitle: 'Which language do you want to learn?',

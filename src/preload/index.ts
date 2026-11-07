@@ -41,10 +41,19 @@ import type {
   TestResult,
   TrackPlanLesson,
   TracksView,
-  TutorSendRequest
+  TutorSendRequest,
+  TutorTurnResult,
+  DbStatusView,
+  LogPathView
 } from '../shared/types'
 
 const api = {
+  /** M6: diagnóstico — versão, caminho do log e estado do banco no boot. */
+  app: {
+    info: (): Promise<{ version: string; name: string }> => ipcRenderer.invoke('app:info'),
+    logPath: (): Promise<LogPathView> => ipcRenderer.invoke('log:get-path'),
+    dbStatus: (): Promise<DbStatusView> => ipcRenderer.invoke('db:status')
+  },
   settings: {
     get: (): Promise<SettingsPayload> => ipcRenderer.invoke('settings:get'),
     update: (patch: Partial<AppSettings>): Promise<SettingsPayload> =>
@@ -86,7 +95,7 @@ const api = {
       ipcRenderer.invoke('tutor:open', conversationId),
     create: (input: { topic?: string | null; lessonId?: number | null } = {}): Promise<ConversationView> =>
       ipcRenderer.invoke('tutor:new', input),
-    send: (request: TutorSendRequest): Promise<void> => ipcRenderer.invoke('tutor:send', request),
+    send: (request: TutorSendRequest): Promise<TutorTurnResult> => ipcRenderer.invoke('tutor:send', request),
     cancel: (requestId: string): Promise<void> => ipcRenderer.invoke('tutor:cancel', requestId),
     close: (conversationId: number): Promise<RecapView> => ipcRenderer.invoke('tutor:close', conversationId)
   },

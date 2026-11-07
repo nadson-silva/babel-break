@@ -6,7 +6,7 @@
  * `study_sessions.summary`, então a sessão sobrevive a fechar o app no meio.
  */
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
-import type { Correction, GuidedSession, GuidedStep, RecapView, ScenarioFeedbackView } from '../shared/types'
+import type { GuidedSession, GuidedStep, RecapView, ScenarioFeedbackView } from '../shared/types'
 import { pickRecommendationOrigin } from '../core/tracks'
 import { emitStudentEvent } from './events'
 import { getDb, schema } from './db'
@@ -339,21 +339,15 @@ export async function finishGuidedSession(profileId: number, input: GuidedFinish
     }
   }
 
-  const corrections: Correction[] = summary.conversationId
-    ? db
-        .select()
-        .from(schema.messages)
-        .where(eq(schema.messages.conversationId, summary.conversationId))
-        .all()
-        .flatMap((message) => parseCorrections(message.corrections))
-    : []
-
   const practice = input.practice ?? summary.practice
   const reviewDone = input.reviewDone ?? summary.review.done
 
-  const recap = buildRecap(profileId, corrections, { reviewDone, practice, scenario })
-
-  if (summary.conversationId) closeConversation(profileId, summary.conversationId)
+  // M6 (B2): um único fechamento faz a recapitulação — antes `buildRecap` e
+  // `closeConversation` rodavam a reestimativa de nível duas vezes (e o cenário
+  // ainda por cima via o recap de `closeConversation`, três).
+  const recap = summary.conversationId
+    ? closeConversation(profileId, summary.conversationId, { reviewDone, practice, scenario })
+    : buildRecap(profileId, [], { reviewDone, practice, scenario })
 
   const now = Date.now()
   db.update(schema.studySessions)
@@ -425,12 +419,3 @@ function requireActive(profileId: number): SessionRow {
   return row
 }
 
-function parseCorrections(json: string | null): Correction[] {
-  if (!json) return []
-  try {
-    const parsed: unknown = JSON.parse(json)
-    return Array.isArray(parsed) ? (parsed as Correction[]) : []
-  } catch {
-    return []
-  }
-}

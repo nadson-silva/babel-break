@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import type { GuidedSession, LanguageOption, ProfileState, ProviderStatus, SettingsPayload } from '../../shared/types'
+import type { DbStatusView, GuidedSession, LanguageOption, ProfileState, ProviderStatus, SettingsPayload } from '../../shared/types'
 import { Sidebar, type View } from './components/Sidebar'
+import { ErrorBoundary } from './components/ErrorBoundary'
 import { t, setUiLanguage } from './i18n'
 import { setLanguageOptions, setNativeLanguage, setTargetLanguage } from './lang'
 import { GuidedScreen } from './screens/GuidedScreen'
@@ -34,6 +35,30 @@ function Splash({ error }: { error: string | null }): JSX.Element {
   )
 }
 
+/** M6 (C4): banco corrompido → tela de recuperação, não app sem janela. */
+function RecoveryNotice({ status, onDismiss }: { status: DbStatusView; onDismiss: () => void }): JSX.Element {
+  return (
+    <div className="grid h-full place-items-center bg-surface p-8">
+      <div className="max-w-lg rounded-2xl border border-warn/40 bg-warn-soft p-6 text-center">
+        <h1 className="text-sm font-semibold text-warn">{t.app.recoveredTitle}</h1>
+        <p className="mt-2 text-xs leading-relaxed text-ink">{t.app.recoveredBody}</p>
+        {status.backupPath && (
+          <p className="mt-3 break-all rounded-lg bg-panel-2 px-3 py-2 text-[10px] text-muted">
+            {t.app.recoveredBackup.replace('{path}', status.backupPath)}
+          </p>
+        )}
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-4 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+        >
+          {t.app.recoveredDismiss}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App(): JSX.Element {
   const [view, setView] = useState<View>('home')
   const [settings, setSettings] = useState<SettingsPayload | null>(null)
@@ -49,6 +74,13 @@ export default function App(): JSX.Element {
   // M5: disponibilidade da IA em runtime — o banner e o chip leem daqui, e o
   // main empurra quando o estado muda (nada de polling no renderer).
   const [aiStatus, setAiStatus] = useState<ProviderStatus | null>(null)
+  // M6 (C4): banco recuperado no boot → a tela de recuperação aparece uma vez.
+  const [dbStatus, setDbStatus] = useState<DbStatusView | null>(null)
+  const [recoveryDismissed, setRecoveryDismissed] = useState(false)
+
+  useEffect(() => {
+    void window.api.app.dbStatus().then(setDbStatus).catch(() => undefined)
+  }, [])
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -102,6 +134,10 @@ export default function App(): JSX.Element {
 
   if (!settings || !profileState) {
     return <Splash error={error} />
+  }
+
+  if (dbStatus?.recovered && !recoveryDismissed) {
+    return <RecoveryNotice status={dbStatus} onDismiss={() => setRecoveryDismissed(true)} />
   }
 
   if (!profileState.profile.onboardingComplete) {
@@ -182,6 +218,16 @@ export default function App(): JSX.Element {
         aiStatus={aiStatus}
       />
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
+        {/* M6 (E1): uma tela que joga derruba só a área de telas, nunca a janela. */}
+        <ErrorBoundary
+          onReset={() => {
+            setActiveLessonId(null)
+            setGuided(null)
+            setScenarioRequest(null)
+            setView('home')
+            setRefreshKey((value) => value + 1)
+          }}
+        >
         {guided ? (
           <GuidedScreen settings={settings} session={guided} onExit={closeGuided} />
         ) : activeLessonId != null ? (
@@ -261,6 +307,7 @@ export default function App(): JSX.Element {
             }}
           />
         )}
+        </ErrorBoundary>
       </main>
     </div>
   )

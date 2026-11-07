@@ -8,7 +8,7 @@
  * de "entrevista" de entregar linguagem C1 para alguém em A2: o nível da trilha
  * é o nível do aluno no momento da aprovação.
  */
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import { and, asc, eq } from 'drizzle-orm'
 import type {
   CefrLevel,
@@ -485,21 +485,21 @@ export function openTrackLessons(profileId: number): LessonSummary[] {
 export function registerTracksIpc(): void {
   const profileId = (): number => getDefaultProfile().id
 
-  ipcMain.handle('track:list', () => tracksView(profileId()))
+  handle('track:list', () => tracksView(profileId()))
 
-  ipcMain.handle('track:draft', (_event, input: { objective: string; replaceId?: number }) =>
+  handle('track:draft', (_event, input: { objective: string; replaceId?: number }) =>
     createTrackDraft(profileId(), { objective: input.objective, replaceId: input.replaceId })
   )
 
-  ipcMain.handle('track:revise', (_event, input: { trackId: number; lessons: TrackPlanLesson[] }) =>
+  handle('track:revise', (_event, input: { trackId: number; lessons: TrackPlanLesson[] }) =>
     reviseTrackDraft(profileId(), input.trackId, input.lessons)
   )
 
-  ipcMain.handle('track:approve', (_event, trackId: number) => approveTrack(profileId(), trackId))
+  handle('track:approve', (_event, trackId: number) => approveTrack(profileId(), trackId))
 
-  ipcMain.handle('track:discard', (_event, trackId: number) => discardTrackDraft(profileId(), trackId))
+  handle('track:discard', (_event, trackId: number) => discardTrackDraft(profileId(), trackId))
 
-  ipcMain.handle('track:status', (_event, input: { trackId: number; status: 'active' | 'archived' }) =>
+  handle('track:status', (_event, input: { trackId: number; status: 'active' | 'archived' }) =>
     setTrackStatus(profileId(), input.trackId, input.status)
   )
 }

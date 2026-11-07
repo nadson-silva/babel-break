@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { handle } from './ipc-contract'
 import { and, asc, count, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import type {
   CefrLevel,
@@ -975,6 +975,12 @@ export async function answerExercise(input: {
     .where(eq(schema.lessons.id, exercise.lessonId))
     .get()
 
+  // M6 (D2): o exercício só responde se a lição dele pertencer ao perfil atual
+  // — id de outro perfil é "não encontrado", não uma porta para dados alheios.
+  if (lesson && !getOwnedLesson(lesson.id, profile.id)) {
+    throw new Error('Exercício não encontrado.')
+  }
+
   const payload = exercisePayload(exercise)
   const answerKey = parseAnswerKey(exercise)
   const type = exercise.type as ExerciseType
@@ -1352,29 +1358,29 @@ export function resetMemory(): ProfileState {
 }
 
 export function registerLearningIpc(): void {
-  ipcMain.handle('profile:get', () => profileState())
+  handle('profile:get', () => profileState())
 
-  ipcMain.handle('profile:onboard', (_event, input: OnboardingInput) => completeOnboarding(input))
+  handle('profile:onboard', (_event, input: OnboardingInput) => completeOnboarding(input))
 
-  ipcMain.handle('profile:reset-memory', () => resetMemory())
+  handle('profile:reset-memory', () => resetMemory())
 
-  ipcMain.handle(
+  handle(
     'placement:generate',
     (_event, input?: string | { goal?: string; targetLang?: string; nativeLang?: string }) =>
       generatePlacement(typeof input === 'string' ? { goal: input } : (input ?? {}))
   )
 
-  ipcMain.handle('placement:submit', (_event, answers: number[]) => submitPlacement(answers))
+  handle('placement:submit', (_event, answers: number[]) => submitPlacement(answers))
 
-  ipcMain.handle('curriculum:get', () => curriculumView())
+  handle('curriculum:get', () => curriculumView())
 
-  ipcMain.handle('curriculum:generate', () => generateCurriculum())
+  handle('curriculum:generate', () => generateCurriculum())
 
-  ipcMain.handle('lesson:open', (_event, lessonId: number) => openLesson(lessonId))
+  handle('lesson:open', (_event, lessonId: number) => openLesson(lessonId))
 
-  ipcMain.handle('lesson:regenerate', (_event, lessonId: number) => regenerateLessonExercises(lessonId))
+  handle('lesson:regenerate', (_event, lessonId: number) => regenerateLessonExercises(lessonId))
 
-  ipcMain.handle(
+  handle(
     'lesson:answer',
     (
       _event,
@@ -1382,7 +1388,7 @@ export function registerLearningIpc(): void {
     ): Promise<GradeFeedback> => answerExercise(input)
   )
 
-  ipcMain.handle('lesson:finish', (_event, input: { lessonId: number; sessionId: number }) =>
+  handle('lesson:finish', (_event, input: { lessonId: number; sessionId: number }) =>
     finishLesson(input)
   )
 }
