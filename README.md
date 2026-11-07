@@ -17,7 +17,20 @@ Sem sessão diária, streak ou meta obrigatória — você estuda quando quiser.
 - [x] Tela de Configurações (provedor, modelo, chave, estilo de correção, peso do foco)
 - [x] Chat de teste com streaming, cancelamento, histórico e persistência
 
-Próximo: M1 — onboarding, nivelamento, currículo, geração de lições e player de exercícios.
+**M1 concluído** — uma lição do início ao fim:
+
+- [x] Onboarding com objetivo e escolha de nível
+- [x] Teste de nivelamento gerado por IA (10 questões, resultado estimado em CEFR)
+- [x] Plano de currículo persistido (unidades e lições, geradas sob demanda)
+- [x] Geração estruturada de lição: explicação em PT-BR, exemplos, gramática e vocabulário
+- [x] Geração de exercícios tipados (múltipla escolha, cloze, ordenar, tradução, produção livre)
+- [x] Player de lição com correção local + avaliação por IA para texto livre
+- [x] Persistência de tentativas, erros, progresso e sessão de estudo
+- [x] Home com "continuar de onde parei", próximo passo sugerido e catálogo de aulas
+- [x] Fallback determinístico local quando o modelo não gera JSON válido (currículo, lição e exercícios)
+
+Próximo: M2 — chat com tutor, correções inline no caderno de erros, cards FSRS sob demanda
+e sessão guiada opcional.
 
 ## Requisitos
 
@@ -104,9 +117,12 @@ src/
   main/            processo principal (Electron)
     db/            schema Drizzle, init e migrações
     providers/     adaptadores Gemini e Ollama
-    ipc.ts         handlers IPC, streaming e persistência
+    ai.ts          geração estruturada (JSON + validação zod)
+    learning.ts    onboarding, nivelamento, currículo, lições e progresso
+    ipc.ts         handlers IPC, streaming e persistência do chat
     secrets.ts     safeStorage + fallback local
     settings.ts    defaults e persistência
+  core/            domínio puro (CEFR, schemas zod, prompts, correção)
   preload/         bridge segura para o renderer
   renderer/        React + Tailwind (UI em PT-BR)
   shared/          tipos compartilhados entre main e renderer

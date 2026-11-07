@@ -8,6 +8,8 @@ export const profiles = sqliteTable('profiles', {
   cefr: text('cefr'),
   focusMix: real('focus_mix').notNull().default(0.3),
   prefs: text('prefs'),
+  onboardingCompletedAt: integer('onboarding_completed_at'),
+  placementScore: real('placement_score'),
   createdAt: integer('created_at').notNull()
 })
 
@@ -34,6 +36,7 @@ export const units = sqliteTable('units', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   profileId: integer('profile_id').notNull(),
   title: text('title').notNull(),
+  description: text('description'),
   level: text('level').notNull(),
   position: integer('position').notNull().default(0),
   createdAt: integer('created_at').notNull()
@@ -44,9 +47,11 @@ export const lessons = sqliteTable('lessons', {
   unitId: integer('unit_id'),
   trackId: integer('track_id'),
   title: text('title').notNull(),
+  objective: text('objective'),
   level: text('level').notNull(),
   content: text('content'),
   scenario: text('scenario'),
+  position: integer('position').notNull().default(0),
   version: integer('version').notNull().default(1),
   createdAt: integer('created_at').notNull()
 })
@@ -65,6 +70,7 @@ export const exercises = sqliteTable('exercises', {
   payload: text('payload').notNull(),
   answerKey: text('answer_key').notNull(),
   source: text('source'),
+  position: integer('position').notNull().default(0),
   createdAt: integer('created_at').notNull()
 })
 

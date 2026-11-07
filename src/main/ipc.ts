@@ -10,6 +10,7 @@ import type {
   TestResult
 } from '../shared/types'
 import { getDb, getDefaultProfile, schema } from './db'
+import { registerLearningIpc } from './learning'
 import { getProvider } from './providers'
 import {
   clearGeminiApiKey,
@@ -204,4 +205,6 @@ export function registerIpcHandlers(): void {
     activeRequests.get(requestId)?.abort()
     activeRequests.delete(requestId)
   })
+
+  registerLearningIpc()
 }

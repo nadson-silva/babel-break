@@ -1,6 +1,6 @@
 import type { ModelInfo, TestResult } from '../../shared/types'
 import { getSettings } from '../settings'
-import type { Provider, StreamRequest } from './types'
+import type { GenerateRequest, Provider, StreamRequest } from './types'
 
 interface OllamaTag {
   name: string
@@ -157,5 +157,41 @@ export const ollamaProvider: Provider = {
     }
 
     return text
+  },
+
+  async generate(request: GenerateRequest): Promise<string> {
+    let response: Response
+    try {
+      response = await fetch(`${baseUrl()}/api/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: request.model,
+          messages: request.messages,
+          stream: false,
+          think: false,
+          ...(request.json ? { format: 'json' } : {}),
+          options: { temperature: request.temperature ?? 0.4 }
+        }),
+        signal: request.signal
+      })
+    } catch (error) {
+      if (error instanceof Error && error.name === 'AbortError') throw error
+      throw new Error(connectionHint())
+    }
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => '')
+      throw new Error(`Ollama respondeu ${response.status}${body ? `: ${body}` : ''}`)
+    }
+
+    const payload = (await response.json()) as {
+      message?: { content?: string }
+      error?: string
+    }
+
+    if (payload.error) throw new Error(payload.error)
+
+    return payload.message?.content ?? ''
   }
 }

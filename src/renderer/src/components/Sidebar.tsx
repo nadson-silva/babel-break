@@ -2,12 +2,39 @@ import type { JSX } from 'react'
 import type { SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
 
-export type View = 'chat' | 'settings'
+export type View = 'home' | 'lessons' | 'chat' | 'settings'
 
 interface SidebarProps {
   view: View
   onNavigate: (view: View) => void
   settings: SettingsPayload
+}
+
+function HomeIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path
+        d="M4 10.5 12 4l8 6.5V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1v-8.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+function LessonsIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path
+        d="M5 5.5A1.5 1.5 0 0 1 6.5 4H19v14.5H6.5A1.5 1.5 0 0 0 5 20V5.5Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M5 17.5h14M9 8.5h6M9 11.8h4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
 }
 
 function ChatIcon(): JSX.Element {
@@ -88,6 +115,18 @@ export function Sidebar({ view, onNavigate, settings }: SidebarProps): JSX.Eleme
       </div>
 
       <nav className="space-y-1 px-3">
+        <NavButton
+          active={view === 'home'}
+          onClick={() => onNavigate('home')}
+          icon={<HomeIcon />}
+          label={t.nav.home}
+        />
+        <NavButton
+          active={view === 'lessons'}
+          onClick={() => onNavigate('lessons')}
+          icon={<LessonsIcon />}
+          label={t.nav.lessons}
+        />
         <NavButton
           active={view === 'chat'}
           onClick={() => onNavigate('chat')}

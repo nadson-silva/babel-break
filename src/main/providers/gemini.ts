@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai'
 import type { ModelInfo, TestResult } from '../../shared/types'
 import { getGeminiApiKey } from '../secrets'
-import type { Provider, StreamRequest } from './types'
+import type { GenerateRequest, Provider, StreamRequest } from './types'
 
 const FALLBACK_MODELS: ModelInfo[] = [
   { id: 'gemini-2.5-flash', label: 'gemini-2.5-flash', description: 'Rápido e barato (padrão)' },
@@ -106,5 +106,34 @@ export const geminiProvider: Provider = {
     }
 
     return text
+  },
+
+  async generate(request: GenerateRequest): Promise<string> {
+    const ai = await client()
+
+    const systemInstruction = request.messages
+      .filter((message) => message.role === 'system')
+      .map((message) => message.content)
+      .join('\n\n')
+
+    const contents = request.messages
+      .filter((message) => message.role !== 'system')
+      .map((message) => ({
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: message.content }]
+      }))
+
+    const response = await ai.models.generateContent({
+      model: request.model,
+      contents,
+      config: {
+        temperature: request.temperature ?? 0.4,
+        ...(systemInstruction ? { systemInstruction } : {}),
+        ...(request.json ? { responseMimeType: 'application/json' } : {}),
+        ...(request.signal ? { abortSignal: request.signal } : {})
+      }
+    })
+
+    return response.text ?? ''
   }
 }

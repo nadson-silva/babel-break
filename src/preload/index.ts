@@ -3,7 +3,16 @@ import type {
   AppSettings,
   ChatEvent,
   ChatSendRequest,
+  CurriculumView,
+  GradeFeedback,
+  HomeState,
+  LessonDetail,
+  LessonResultView,
   ModelInfo,
+  OnboardingInput,
+  PlacementResult,
+  PlacementTest,
+  ProfileState,
   ProviderId,
   SettingsPayload,
   StoredMessage,
@@ -34,6 +43,37 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent, payload: ChatEvent): void => callback(payload)
       ipcRenderer.on('chat:event', listener)
       return () => ipcRenderer.removeListener('chat:event', listener)
+    }
+  },
+  learning: {
+    profile: {
+      get: (): Promise<ProfileState> => ipcRenderer.invoke('profile:get'),
+      onboard: (input: OnboardingInput): Promise<ProfileState> =>
+        ipcRenderer.invoke('profile:onboard', input)
+    },
+    placement: {
+      generate: (goal?: string): Promise<PlacementTest> =>
+        ipcRenderer.invoke('placement:generate', goal),
+      submit: (answers: number[]): Promise<PlacementResult> =>
+        ipcRenderer.invoke('placement:submit', answers)
+    },
+    curriculum: {
+      get: (): Promise<CurriculumView> => ipcRenderer.invoke('curriculum:get'),
+      generate: (): Promise<CurriculumView> => ipcRenderer.invoke('curriculum:generate')
+    },
+    lesson: {
+      open: (lessonId: number): Promise<LessonDetail> =>
+        ipcRenderer.invoke('lesson:open', lessonId),
+      answer: (input: {
+        exerciseId: number
+        response: string
+        latencyMs?: number
+      }): Promise<GradeFeedback> => ipcRenderer.invoke('lesson:answer', input),
+      finish: (input: { lessonId: number; sessionId: number }): Promise<LessonResultView> =>
+        ipcRenderer.invoke('lesson:finish', input)
+    },
+    home: {
+      get: (): Promise<HomeState> => ipcRenderer.invoke('home:get')
     }
   }
 }

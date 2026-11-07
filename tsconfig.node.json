@@ -19,6 +19,7 @@
     "electron.vite.config.ts",
     "drizzle.config.ts",
     "src/main/**/*.ts",
+    "src/core/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts"
   ]
