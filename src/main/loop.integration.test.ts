@@ -17,7 +17,8 @@ import {
   finishLesson,
   generateCurriculum,
   lastOpenedLesson,
-  openLesson
+  openLesson,
+  regenerateLessonExercises
 } from './learning'
 import { focusFor, notebookView, recordCorrections } from './notebook'
 import { answerReview, cardsForRecurringErrors, reviewState } from './review'
@@ -238,4 +239,49 @@ it('home agrega revisão, caderno e "continuar de onde parei"', async () => {
   expect(home.review.total).toBeGreaterThan(0)
   expect(home.notebook.open).toBeGreaterThan(0)
   expect(home.notebook.tags.length).toBeGreaterThan(0)
+})
+
+describe('regenerar o bloco de exercícios', () => {
+  const lessons = () => curriculumView().units.flatMap((unit) => unit.lessons)
+
+  it('troca os exercícios, preserva o conteúdo e não deixa tentativa órfã', async () => {
+    const lesson = lessons()[0]
+    const before = await openLesson(lesson.id)
+    await answerExercise({ exerciseId: before.exercises[0].id, response: 'zzz de novo' })
+
+    const after = await regenerateLessonExercises(lesson.id)
+
+    expect(after.exercises).toHaveLength(before.exercises.length)
+    expect(after.exercises.map((entry) => entry.id)).not.toEqual(before.exercises.map((entry) => entry.id))
+    expect(after.content.explanation).toBe(before.content.explanation)
+
+    const live = new Set(
+      getDb()
+        .select({ id: schema.exercises.id })
+        .from(schema.exercises)
+        .all()
+        .map((row) => row.id)
+    )
+    const orphans = getDb()
+      .select({ exerciseId: schema.attempts.exerciseId })
+      .from(schema.attempts)
+      .all()
+      .filter((row) => !live.has(row.exerciseId))
+    expect(orphans).toHaveLength(0)
+  })
+
+  it('sem IA, mantém o bloco gerado pela IA em vez de rebaixar a lição', async () => {
+    const lesson = lessons()[1]
+    const before = await openLesson(lesson.id)
+    getDb()
+      .update(schema.exercises)
+      .set({ source: 'ai' })
+      .where(eq(schema.exercises.lessonId, lesson.id))
+      .run()
+
+    await expect(regenerateLessonExercises(lesson.id)).rejects.toThrow(/indispon/)
+
+    const after = await openLesson(lesson.id)
+    expect(after.exercises.map((entry) => entry.id)).toEqual(before.exercises.map((entry) => entry.id))
+  })
 })

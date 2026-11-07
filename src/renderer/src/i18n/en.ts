@@ -370,6 +370,8 @@ export const en: Dictionary = {
     summaryLevel: 'Level re-estimated: {from} → {to}.',
     backHome: 'Back to home',
     restart: 'Redo exercises',
+    regenerate: 'Generate new exercises',
+    regenerating: 'Generating exercises…',
     emptyAnswer: 'Write or build an answer before checking.',
     trackBadge: 'track: {title}',
     scenarioCta: 'Close the lesson with a scenario',
@@ -430,6 +432,14 @@ export const en: Dictionary = {
     testOk: 'Connection OK',
     testFail: 'Connection failed',
     modelsError: 'Could not list the models. You can still type the identifier.',
-    saveFirst: 'Save the changes before testing.'
+    saveFirst: 'Save the changes before testing.',
+    memoryTitle: 'Reset memory',
+    memoryHelp:
+      'Clears the error notebook, review cards, progress, conversations, tracks and curriculum — and restarts onboarding like the first launch, with another language if you want. AI settings and the Gemini key are untouched.',
+    memoryReset: 'Reset memory',
+    memoryConfirm: 'This deletes your entire learning history. There is no undo.',
+    memoryResetConfirm: 'Yes, erase everything',
+    memoryResetting: 'Erasing…',
+    memoryResetCancel: 'Cancel'
   }
 }

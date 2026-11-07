@@ -99,7 +99,9 @@ const api = {
     profile: {
       get: (): Promise<ProfileState> => ipcRenderer.invoke('profile:get'),
       onboard: (input: OnboardingInput): Promise<ProfileState> =>
-        ipcRenderer.invoke('profile:onboard', input)
+        ipcRenderer.invoke('profile:onboard', input),
+      /** Apaga a memória de aprendizado e volta ao estado de primeiro acesso. */
+      resetMemory: (): Promise<ProfileState> => ipcRenderer.invoke('profile:reset-memory')
     },
     placement: {
       generate: (
@@ -115,6 +117,9 @@ const api = {
     lesson: {
       open: (lessonId: number): Promise<LessonDetail> =>
         ipcRenderer.invoke('lesson:open', lessonId),
+      /** Gera de novo os exercícios da lição (o conteúdo fica). */
+      regenerate: (lessonId: number): Promise<LessonDetail> =>
+        ipcRenderer.invoke('lesson:regenerate', lessonId),
       answer: (input: {
         exerciseId: number
         response: string

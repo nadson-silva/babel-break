@@ -220,6 +220,17 @@ export default function App(): JSX.Element {
             languages={languages}
             profile={profileState.profile}
             onChanged={setSettings}
+            onMemoryReset={(state) => {
+              // Perfil novo, onboarding do zero: limpa o que estava em aberto.
+              setProfileState(state)
+              setActiveLessonId(null)
+              setGuided(null)
+              setTutorConversation(null)
+              setScenarioRequest(null)
+              setDueCount(0)
+              setView('home')
+              setRefreshKey((value) => value + 1)
+            }}
           />
         )}
       </main>

@@ -365,6 +365,8 @@ export const ptBR = {
     summaryLevel: 'Nível reestimado: {from} → {to}.',
     backHome: 'Voltar para o início',
     restart: 'Refazer exercícios',
+    regenerate: 'Gerar novos exercícios',
+    regenerating: 'Gerando exercícios…',
     emptyAnswer: 'Escreva ou monte uma resposta antes de verificar.',
     trackBadge: 'trilha: {title}',
     scenarioCta: 'Fechar a lição em cenário',
@@ -425,7 +427,15 @@ export const ptBR = {
     testOk: 'Conexão OK',
     testFail: 'Falha na conexão',
     modelsError: 'Não foi possível listar os modelos. Você ainda pode digitar o identificador.',
-    saveFirst: 'Salve as alterações antes de testar.'
+    saveFirst: 'Salve as alterações antes de testar.',
+    memoryTitle: 'Reiniciar memória',
+    memoryHelp:
+      'Apaga o caderno de erros, os cards de revisão, o progresso, as conversas, as trilhas e o currículo — e recomeça o onboarding como no primeiro acesso, inclusive com outro idioma. As configurações de IA e a chave do Gemini não são tocadas.',
+    memoryReset: 'Reiniciar memória',
+    memoryConfirm: 'Isso apaga todo o histórico de aprendizado. Não dá para desfazer.',
+    memoryResetConfirm: 'Sim, apagar tudo',
+    memoryResetting: 'Apagando…',
+    memoryResetCancel: 'Cancelar'
   }
 }
 

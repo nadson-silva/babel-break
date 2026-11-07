@@ -192,7 +192,10 @@ export function exercisePrompt(input: {
       `- cloze: a resposta precisa ser deduzível do enunciado. prompt é uma frase em ${locale.targetName} com "___" no lugar da palavra, seguida da tradução da palavra que falta entre parênteses — ex.: "It is a ___ (delicada) situation for this scenario."; answer é a palavra que falta em ${locale.targetName}.`,
       orderRule,
       `- translate: prompt é uma frase em ${locale.nativeName} para traduzir ao ${locale.targetName}; answer é a tradução correta em ${locale.targetName}.`,
-      `- free_production: prompt é uma situação curta em ${locale.nativeName} pedindo resposta em ${locale.targetName}; answer é uma resposta-modelo curta em ${locale.targetName}.`,
+      `- free_production: o prompt mostra a fala em ${locale.targetName} à qual o aluno responde, entre aspas, seguida do que ele deve dizer em ${locale.nativeName} — ex.: 'Alguém pergunta: "<frase em ${locale.targetName}>". Responda que sim e diga quando foi.'; answer é uma resposta-modelo curta em ${locale.targetName}.`,
+      // Sem isso o feedback cita texto que o aluno nunca viu: "perguntas com
+      // 'Have you ever...?'" num enunciado escrito só no idioma nativo.
+      `O aluno vê apenas instruction e prompt: nada do que ele precisa para responder pode estar fora do prompt.`,
       'Para tipos sem options ou tokens, use array vazio []. alternatives pode trazer variações aceitáveis (ou []).',
       `instructions em ${locale.nativeName}. explanation em ${locale.nativeName}, curta.`,
       'targetTags: as tags de erro que o exercício treina, sempre kebab-case em inglês (use [] se nenhum).',
@@ -236,6 +239,7 @@ export function gradePrompt(input: {
       `Resposta do aluno: ${input.response}`,
       'Aceite variações naturais e pequenos deslizes que não mudem o sentido (ex.: contrações, artigo, ortografia alternativa).',
       'Seja rigoroso com o ponto gramatical-alvo do exercício.',
+      'Cite apenas o que está no Enunciado: se ele não traz a pergunta no idioma-alvo, avalie pelo sentido e pelo ponto gramatical sem supor o texto dessa pergunta.',
       `correct: true/false. score entre 0 e 1. feedback em ${locale.nativeName}, 1 a 2 frases, gentil e específico.`,
       `corrected: a versão corrigida da resposta do aluno (ou a própria resposta se estiver correta).`,
       'errorTags: 1 a 3 tags curtas em inglês, kebab-case (ex.: past-tense, articles, word-order, vocabulary). Use [] se estiver correto.'

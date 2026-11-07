@@ -87,6 +87,7 @@ declare global {
         profile: {
           get(): Promise<ProfileState>
           onboard(input: OnboardingInput): Promise<ProfileState>
+          resetMemory(): Promise<ProfileState>
         }
         placement: {
           generate(
@@ -100,6 +101,7 @@ declare global {
         }
         lesson: {
           open(lessonId: number): Promise<LessonDetail>
+          regenerate(lessonId: number): Promise<LessonDetail>
           answer(input: {
             exerciseId: number
             response: string

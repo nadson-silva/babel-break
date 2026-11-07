@@ -96,6 +96,30 @@ describe('contratos parametrizados', () => {
     expect(spaced.user).toContain('kebab-case em inglês')
   })
 
+  /**
+   * free_production não pode depender de texto escondido: se a pergunta no
+   * idioma-alvo não aparece no enunciado, o aluno não tem como saber que ela
+   * existia — e o feedback que a cita vira charada.
+   */
+  it('free_production mostra a fala do idioma-alvo no enunciado', () => {
+    const prompt = exercisePrompt({ content, level: 'B1', goal: '', errors: [], locale: ja })
+    expect(prompt.user).toContain('a fala em japonês à qual o aluno responde')
+
+    const spaced = exercisePrompt({ content, level: 'B1', goal: '', errors: [], locale: es })
+    expect(spaced.user).toContain('a fala em espanhol à qual o aluno responde')
+    expect(spaced.user).toContain('O aluno vê apenas instruction e prompt')
+  })
+
+  it('gradeção ancora o feedback no enunciado que o aluno viu', () => {
+    const grading = gradePrompt({
+      type: 'free_production', prompt: 'Alguém pergunta se você já viajou para a Europa.',
+      answer: 'Yes, I have. I went there two years ago.', alternatives: [],
+      explanation: '', response: 'yes, i went there two years ago', level: 'B1', locale: ja
+    })
+    expect(grading.user).toContain('Cite apenas o que está no Enunciado')
+    expect(grading.user).toContain('sem supor o texto dessa pergunta')
+  })
+
   it('correção e nivelamento de resposta falam a língua do aluno', () => {
     const grading = gradePrompt({
       type: 'translate', prompt: 'Fala sobre ontem', answer: '昨日、会議があった', alternatives: [],

@@ -4,6 +4,7 @@ import type {
   AppSettings,
   LanguageOption,
   ModelInfo,
+  ProfileState,
   ProfileView,
   ProviderId,
   SettingsPayload,
@@ -17,6 +18,8 @@ interface SettingsScreenProps {
   languages: LanguageOption[]
   profile: ProfileView
   onChanged: (settings: SettingsPayload) => void
+  /** Memória reiniciada: o App assume o perfil novo (o onboarding recomeça). */
+  onMemoryReset: (state: ProfileState) => void
 }
 
 function toForm(settings: SettingsPayload): AppSettings {
@@ -60,7 +63,13 @@ function Section({
   )
 }
 
-export function SettingsScreen({ settings, languages, profile, onChanged }: SettingsScreenProps): JSX.Element {
+export function SettingsScreen({
+  settings,
+  languages,
+  profile,
+  onChanged,
+  onMemoryReset
+}: SettingsScreenProps): JSX.Element {
   const [form, setForm] = useState<AppSettings>(() => toForm(settings))
   const [models, setModels] = useState<Record<ProviderId, ModelInfo[]>>({ gemini: [], ollama: [] })
   const [modelErrors, setModelErrors] = useState<Record<ProviderId, string | null>>({
@@ -78,6 +87,9 @@ export function SettingsScreen({ settings, languages, profile, onChanged }: Sett
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [results, setResults] = useState<Partial<Record<ProviderId, TestResult>>>({})
   const [error, setError] = useState<string | null>(null)
+  // Reinício de memória: dois toques (pedir confirmação, depois apagar).
+  const [confirmReset, setConfirmReset] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
   // O modelo vem como <select>; o input livre fica sob demanda (e é o padrão
   // quando o provedor está inacessível e não há lista para montar).
   const [manualModel, setManualModel] = useState<Record<ProviderId, boolean>>({
@@ -185,6 +197,21 @@ export function SettingsScreen({ settings, languages, profile, onChanged }: Sett
       setError(messageOf(keyError))
     } finally {
       setKeyBusy(false)
+    }
+  }
+
+  async function resetMemory(): Promise<void> {
+    setResetBusy(true)
+    setError(null)
+
+    try {
+      const state = await window.api.learning.profile.resetMemory()
+      setConfirmReset(false)
+      onMemoryReset(state)
+    } catch (resetError) {
+      setError(messageOf(resetError))
+    } finally {
+      setResetBusy(false)
     }
   }
 
@@ -572,6 +599,38 @@ export function SettingsScreen({ settings, languages, profile, onChanged }: Sett
             </dl>
             {settings.runtime.platform === 'linux' && (
               <p className="mt-3 text-[11px] leading-relaxed text-faint">{t.settings.linuxNote}</p>
+            )}
+          </Section>
+
+          <Section title={t.settings.memoryTitle} help={t.settings.memoryHelp}>
+            {!confirmReset ? (
+              <button
+                type="button"
+                onClick={() => setConfirmReset(true)}
+                className="rounded-lg border border-line px-4 py-2 text-sm text-muted transition-colors hover:border-danger/50 hover:text-danger"
+              >
+                {t.settings.memoryReset}
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mr-2 text-xs font-medium text-danger">{t.settings.memoryConfirm}</span>
+                <button
+                  type="button"
+                  onClick={() => void resetMemory()}
+                  disabled={resetBusy}
+                  className="rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-surface transition-opacity hover:opacity-90 disabled:opacity-50"
+                >
+                  {resetBusy ? t.settings.memoryResetting : t.settings.memoryResetConfirm}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfirmReset(false)}
+                  disabled={resetBusy}
+                  className="rounded-lg border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-40"
+                >
+                  {t.settings.memoryResetCancel}
+                </button>
+              </div>
             )}
           </Section>
         </div>

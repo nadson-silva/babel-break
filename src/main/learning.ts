@@ -449,7 +449,9 @@ function toExerciseView(row: ExerciseRow): ExerciseView {
 async function ensureLessonGenerated(
   lesson: LessonRow,
   profile: ProfileRow,
-  owner: LessonOwner
+  owner: LessonOwner,
+  /** Recria os exercícios mesmo com o bloco antigo salvo (pedido do aluno na lição). */
+  options: { forceExercises?: boolean } = {}
 ): Promise<ErrorFocusEntry[]> {
   const db = getDb()
   const level = toCefr(lesson.level)
@@ -549,12 +551,12 @@ async function ensureLessonGenerated(
   }
 
   const existingExercises = db
-    .select({ id: schema.exercises.id })
+    .select({ id: schema.exercises.id, source: schema.exercises.source })
     .from(schema.exercises)
     .where(eq(schema.exercises.lessonId, lesson.id))
     .all()
 
-  if (existingExercises.length > 0) return focus
+  if (existingExercises.length > 0 && !options.forceExercises) return focus
 
   const hints = recentErrorHints(profile.id)
   const prompt = exercisePrompt({
@@ -581,6 +583,13 @@ async function ensureLessonGenerated(
       throw new Error(
         `A IA está indisponível e o gerador offline só cobre inglês. ` +
           `Para gerar exercícios de ${locale.targetName}, configure um provedor em Configurações.`
+      )
+    }
+    // Regenerar não pode piorar a lição: sem IA, o gerador local é mais pobre
+    // que o bloco salvo — mantém o atual e avisa em vez de trocar em silêncio.
+    if (options.forceExercises && existingExercises.some((row) => row.source === 'ai')) {
+      throw new Error(
+        'A IA está indisponível, então os exercícios atuais foram mantidos. Tente de novo quando o provedor voltar.'
       )
     }
     console.warn(
@@ -643,6 +652,18 @@ async function ensureLessonGenerated(
   })
 
   db.transaction((tx) => {
+    if (existingExercises.length > 0) {
+      // `attempts` não tem FK: apagar os exercícios e deixar as tentativas
+      // para trás criaria linhas órfãs apontando para exercícios extintos.
+      tx.delete(schema.attempts)
+        .where(
+          inArray(
+            schema.attempts.exerciseId,
+            existingExercises.map((entry) => entry.id)
+          )
+        )
+        .run()
+    }
     tx.delete(schema.exercises).where(eq(schema.exercises.lessonId, lesson.id)).run()
     for (const row of rows) {
       tx.insert(schema.exercises).values(row).run()
@@ -731,6 +752,21 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
     focus,
     sessionId: session.id
   }
+}
+
+/**
+ * Recria o bloco de exercícios de uma lição sem tocar no conteúdo. Os novos
+ * exercícios só substituem os antigos depois de gerados e validados: sem IA,
+ * a lição mantém o que já tinha em vez de cair para o gerador local.
+ */
+export async function regenerateLessonExercises(lessonId: number): Promise<LessonDetail> {
+  const profile = getDefaultProfile()
+  const owned = getOwnedLesson(lessonId, profile.id)
+
+  if (!owned) throw new Error('Lição não encontrada.')
+
+  await ensureLessonGenerated(owned.lesson, profile, owned.owner, { forceExercises: true })
+  return openLesson(lessonId)
 }
 
 export async function answerExercise(input: {
@@ -1095,10 +1131,44 @@ export function completeOnboarding(input: OnboardingInput): ProfileState {
   return profileState()
 }
 
+/**
+ * "Primeiro acesso": apaga toda a memória de aprendizado — caderno de erros,
+ * cards e revisões, tentativas, progresso, sessões, conversas, trilhas e
+ * currículo — e remove o perfil. O próximo `getDefaultProfile()` recria o
+ * perfil padrão, o onboarding recomeça e dá para escolher outro idioma.
+ * Configurações de IA e chaves não são tocadas: são preferência do app, não
+ * memória do aluno.
+ */
+export function resetMemory(): ProfileState {
+  getDb().transaction((tx) => {
+    tx.delete(schema.reviews).run()
+    tx.delete(schema.cards).run()
+    tx.delete(schema.errors).run()
+    tx.delete(schema.attempts).run()
+    tx.delete(schema.scenarioRuns).run()
+    tx.delete(schema.messages).run()
+    tx.delete(schema.conversations).run()
+    tx.delete(schema.studySessions).run()
+    tx.delete(schema.lessonProgress).run()
+    tx.delete(schema.trackLessons).run()
+    tx.delete(schema.exercises).run()
+    tx.delete(schema.lessonItems).run()
+    tx.delete(schema.lessons).run()
+    tx.delete(schema.units).run()
+    tx.delete(schema.focusTracks).run()
+    tx.delete(schema.skillsState).run()
+    tx.delete(schema.profiles).run()
+  })
+
+  return profileState()
+}
+
 export function registerLearningIpc(): void {
   ipcMain.handle('profile:get', () => profileState())
 
   ipcMain.handle('profile:onboard', (_event, input: OnboardingInput) => completeOnboarding(input))
+
+  ipcMain.handle('profile:reset-memory', () => resetMemory())
 
   ipcMain.handle(
     'placement:generate',
@@ -1113,6 +1183,8 @@ export function registerLearningIpc(): void {
   ipcMain.handle('curriculum:generate', () => generateCurriculum())
 
   ipcMain.handle('lesson:open', (_event, lessonId: number) => openLesson(lessonId))
+
+  ipcMain.handle('lesson:regenerate', (_event, lessonId: number) => regenerateLessonExercises(lessonId))
 
   ipcMain.handle(
     'lesson:answer',

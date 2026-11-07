@@ -29,6 +29,8 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
   const [doneCount, setDoneCount] = useState(0)
   const [due, setDue] = useState<CardView[]>([])
   const [reviewing, setReviewing] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
+  const [actionError, setActionError] = useState<string | null>(null)
   const alive = useRef(true)
 
   async function load(): Promise<void> {
@@ -59,6 +61,30 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
 
     setDue(next.due)
     if (result.dueCount === 0) setReviewing(false)
+  }
+
+  /**
+   * Troca o bloco de exercícios da lição (enunciado ruim, repetido, resposta
+   * impossível de deduzir). O índice e as respostas são estado interno do
+   * player, então ele é remontado e a prática recomeça do zero.
+   */
+  async function regenerate(): Promise<void> {
+    if (regenerating) return
+
+    setRegenerating(true)
+    setActionError(null)
+
+    try {
+      const opened = await window.api.learning.lesson.regenerate(lessonId)
+      if (!alive.current) return
+      setDetail(opened)
+      setDoneCount(0)
+      setFinished(null)
+    } catch (error) {
+      if (alive.current) setActionError(messageOf(error))
+    } finally {
+      if (alive.current) setRegenerating(false)
+    }
   }
 
   useEffect(() => {
@@ -163,17 +189,35 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
             {detail.lesson.level}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onBack}
-          className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
-        >
-          {t.player.back}
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {phase !== 'summary' && (
+            <button
+              type="button"
+              onClick={() => void regenerate()}
+              disabled={regenerating}
+              className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-60"
+            >
+              {regenerating ? t.player.regenerating : t.player.regenerate}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onBack}
+            className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+          >
+            {t.player.back}
+          </button>
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto max-w-3xl pb-10">
+          {actionError && (
+            <div className="mb-5 rounded-xl border border-danger/30 bg-danger-soft px-4 py-2.5 text-xs leading-relaxed text-ink">
+              {actionError}
+            </div>
+          )}
+
           {phase !== 'summary' && (
             <div className="mb-6 h-1 overflow-hidden rounded-full bg-panel-2">
               <div
@@ -338,6 +382,9 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
 
           {phase === 'exercises' && (
             <ExercisePlayer
+              // Id do primeiro exercício: regenerar troca os ids e remonta o
+              // player, que guarda índice e respostas no próprio estado.
+              key={detail.exercises[0]?.id ?? lessonId}
               exercises={detail.exercises}
               onProgress={(index) => setDoneCount(index)}
               onComplete={async () => {
