@@ -83,8 +83,10 @@ describe('FK com cascade + índices (M6/C5/C6)', () => {
 
   it('índices novos existem no banco', () => {
     const db = getDb()
-    const rows = db.all(sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%\_idx'`)
-    const indexed = rows.map((row) => String(row.name))
+    const rows = db.all(sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%\_idx'`) as Array<{
+      name: string
+    }>
+    const indexed = rows.map((row) => row.name)
 
     for (const name of [
       'exercises_lesson_idx',

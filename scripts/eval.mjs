@@ -47,6 +47,21 @@ function flagValue(name) {
   return inline ? inline.slice(name.length + 1) : null
 }
 
+/**
+ * M6 (F1): núcleo real do app (prompts/schemas/banco) via esbuild em memória.
+ * Se falhar, o harness ainda roda com os contratos colados à mão (degradación
+ * honesta), mas o gate é mais fiel quando o CORE existe.
+ */
+let CORE = null
+let BANK_GOLDENS = null
+try {
+  const { loadEvalCore, goldensFromBank } = await import('./eval-core.mjs')
+  CORE = await loadEvalCore()
+  BANK_GOLDENS = goldensFromBank
+} catch (error) {
+  console.warn(`[eval] núcleo real indisponível, usando contratos locais: ${error.message}`)
+}
+
 // --- Idiomas avaliados -------------------------------------------------------
 //
 // Quatro casos que cobrem as classes de escrita do registro do app (§5):
@@ -120,6 +135,23 @@ const LANGS = {
 }
 
 const LANG = LANGS[langCode]
+
+if (LANG) {
+  LANG.code = langCode
+
+  // M6 (F1/F2): para os pares com banco manual (PT→EN, PT→ES), os goldens
+  // VÊM do banco: cada regra contribui um caso sujo (wrong→right) e a forma
+  // canônica vira caso limpo, que deve voltar sem correção. É isto que fecha
+  // a inversão antiga em que frase correta pontuava como falha.
+  if (CORE && BANK_GOLDENS) {
+    const bank = langCode === 'en'
+      ? CORE.interference.INTERFERENCE_BANK
+      : langCode === 'es'
+        ? CORE.interference.PT_ES_INTERFERENCE_BANK
+        : null
+    if (bank) LANG.golden = BANK_GOLDENS(CORE, bank, 6)
+  }
+}
 
 if (!LANG) {
   console.error(`Idioma desconhecido: --lang ${langCode}. Opções: ${Object.keys(LANGS).join(', ')}`)
@@ -467,18 +499,33 @@ function tasksFor(lang) {
   ]
 
   // Acurácia de correção: um par golden vira uma tarefa de grade_answer.
+  // M6 (F1): com o núcleo real carregado, o prompt e o schema enviados são os
+  // MESMOS que o app usa (correctionPrompt + correctionSetSchema), e os
+  // goldens saem do banco de interferência — o contrato avaliado é o contrato
+  // do produto, não uma colagem à mão.
   for (const [index, golden] of lang.golden.entries()) {
-    tasks.push({
-      name: `grade_answer_${index + 1}`,
-      schema: SCHEMAS.correction,
-      user: [
-        `Corrija a frase de um aluno de ${lang.target}: "${golden.text}"`,
-        'Devolva corrections (original, corrected, tag, note) e recast.',
-        'Tags em kebab-case, em inglês.'
-      ].join('\n'),
-      check: 'correction',
-      golden
-    })
+    let user = [
+      `Corrija a frase de um aluno de ${lang.target}: "${golden.text}"`,
+      'Devolva corrections (original, corrected, tag, note) e recast.',
+      'Tags em kebab-case, em inglês.'
+    ].join('\n')
+    let schema = SCHEMAS.correction
+    let system = undefined
+
+    if (CORE) {
+      const prompt = CORE.correction.correctionPrompt({
+        text: golden.text,
+        level: 'A2',
+        style: 'both',
+        errors: [],
+        locale: CORE.prompts.promptLocale(lang.code, 'pt-BR')
+      })
+      user = prompt.user
+      system = prompt.system
+      schema = CORE.z.toJSONSchema(CORE.schemas.correctionSetSchema)
+    }
+
+    tasks.push({ name: `grade_answer_${index + 1}`, schema, user, system, check: 'correction', golden })
   }
 
   tasks.push({
@@ -497,8 +544,8 @@ function tasksFor(lang) {
 
 // --- Provedores --------------------------------------------------------------
 
-async function ask(user, schema, temperature = 0.3) {
-  const prompt = `${SYSTEM}\n\nFormato obrigatório (JSON Schema):\n${JSON.stringify(schema)}\n\nTarefa:\n${user}`
+async function ask(user, schema, temperature = 0.3, system = SYSTEM) {
+  const prompt = `${system}\n\nFormato obrigatório (JSON Schema):\n${JSON.stringify(schema)}\n\nTarefa:\n${user}`
   const startedAt = Date.now()
 
   if (provider === 'gemini') {
@@ -610,19 +657,38 @@ function looksUsable(task, parsed) {
   return Array.isArray(parsed.corrections)
 }
 
-/** Acurácia de correção: pegou a tag esperada e a forma esperada? */
+/**
+ * Acurácia de correção: pegou a tag esperada e a forma esperada?
+ *
+ * M6 (F1/F2): golden com `tag: 'correct'` e `expect: ''` é uma frase CORRETA —
+ * sucesso aqui é não corrigir nada (hasErrors false / corrections vazias). O
+ * harness antigo tratava "zero correções" como falha e, portanto, pontuava
+ * alucinação como sucesso.
+ */
 function correctionAccuracy(parsed, golden) {
   const corrections = Array.isArray(parsed?.corrections) ? parsed.corrections : []
+  const cleanExpected = !String(golden.expect || '').trim() && normalize(String(golden.tag)) === 'correct'
+
+  if (cleanExpected) {
+    return { tagHit: true, formHit: true, pass: corrections.length === 0, found: corrections.length, clean: true }
+  }
+
   const tags = corrections.map((correction) => normalize(correction.tag))
   const joined = corrections.map((correction) => normalize(correction.corrected)).join(' | ')
 
-  const tagAlternatives = String(golden.tag).split('|').map((tag) => normalize(tag))
-  const tagHit = tagAlternatives.some((tag) => tags.some((entry) => entry.includes(tag)))
+  const tagAlternatives = String(golden.tag)
+    .split('|')
+    .map((tag) => normalize(tag))
+    .filter((tag) => tag && tag !== 'correct')
+  const tagHit = tagAlternatives.length === 0
+    ? corrections.length > 0
+    : tagAlternatives.some((tag) => tags.some((entry) => entry.includes(tag)))
 
   const forms = String(golden.expect || '')
     .split('|')
     .map((entry) => normalize(entry))
     .filter(Boolean)
+  // Sem `expect`, o teste é só de tag: precisa achar alguma correção.
   const formHit = forms.length === 0 ? corrections.length > 0 : forms.some((form) => joined.includes(form))
 
   return { tagHit, formHit, pass: tagHit && formHit, found: corrections.length }
@@ -665,6 +731,38 @@ async function runOffline() {
   console.log(`\n=== linha de base determinística · sem IA (${langCode}) ===`)
   console.log('A passada offline (bancos de interferência, FSRS, correção, i18n) roda em `npm test`.\n')
 
+  // `npm run eval -- --offline` já embute o CORE (mesmos contratos do app) —
+  // se a compilação falhar, o gate de teste ainda roda, e o exit code conta.
+  if (!CORE) {
+    try {
+      const { loadEvalCore, goldensFromBank } = await import('./eval-core.mjs')
+      CORE = await loadEvalCore()
+      BANK_GOLDENS = goldensFromBank
+      console.log('Núcleo real carregado (prompts/schemas/banco do app).\n')
+    } catch (error) {
+      console.warn(`[eval] núcleo real indisponível no modo offline: ${error.message}`)
+    }
+  }
+
+  // Sanidade dos derivado-do-banco: os goldens limpos do CORE precisam passar
+  // no avaliador do harness (frase correta ⇒ sem correções).
+  if (CORE && BANK_GOLDENS) {
+    const goldens = BANK_GOLDENS(CORE, CORE.interference.INTERFERENCE_BANK, 6)
+    const cleanGoldens = goldens.filter((g) => g.tag === 'correct')
+    // O teste de verdade: o banco determinístico do app não pode achar erro em
+    // nenhuma forma canônica correta (falso positivo = alucinação garantida).
+    const bankClean = cleanGoldens.every(
+      (g) => CORE.correction.bankCorrections(g.text, CORE.interference.INTERFERENCE_BANK).length === 0
+    )
+    const allCleanPass = cleanGoldens.every((g) => correctionAccuracy({ corrections: [] }, g).pass)
+    const hallucinationFails = cleanGoldens.every((g) => !correctionAccuracy({ corrections: [{ original: g.text, corrected: g.text + '!' , tag: 'x' }] }, g).pass)
+    console.log(`goldens do banco: ${goldens.length} (${cleanGoldens.length} limpos) · avaliador: limpo-passa=${allCleanPass} alucinação-falha=${hallucinationFails} banco-sem-falso-positivo=${bankClean}`)
+    if (!(allCleanPass && hallucinationFails && bankClean)) {
+      console.error('\nGate offline: o avaliador está invertido (frase correta deve passar sem correções).\n')
+      process.exit(1)
+    }
+  }
+
   const result = spawnSync('npx', ['vitest', 'run', '--reporter=dot'], {
     encoding: 'utf8',
     cwd: process.cwd()
@@ -702,7 +800,7 @@ async function main() {
 
   for (const task of subset) {
     try {
-      const { text, latencyMs } = await ask(task.user, task.schema)
+      const { text, latencyMs } = await ask(task.user, task.schema, 0.3, task.system ?? SYSTEM)
       const parsed = extractJson(text)
       const valid = parsed !== null
       const usable = valid && looksUsable(task, parsed)
@@ -757,11 +855,58 @@ async function main() {
     console.log(`latência       : p50 ${sorted[Math.floor(sorted.length / 2)]} ms · máx ${sorted[sorted.length - 1]} ms`)
   }
 
+  // M6 (F2): histórico em JSON — um run sozinho é anedota; a série é o gate.
+  const cleanRows = rows.filter((row) => row.accuracy?.clean)
+  const cleanPass = cleanRows.filter((row) => row.accuracy.pass).length
+  const dirtyRows = rows.filter((row) => row.accuracy && !row.accuracy.clean)
+  const dirtyPass = dirtyRows.filter((row) => row.accuracy.pass).length
+
+  const summary = {
+    at: new Date().toISOString(),
+    provider,
+    model,
+    lang: langCode,
+    total,
+    valid: validCount,
+    usable: usableCount,
+    cleanGoldens: { total: cleanRows.length, pass: cleanPass },
+    correctionGoldens: { total: dirtyRows.length, pass: dirtyPass },
+    rows
+  }
+
+  const fs = await import('node:fs')
+  const path = await import('node:path')
+  const dir = path.resolve(process.cwd(), 'eval-results')
+  fs.mkdirSync(dir, { recursive: true })
+  const stamp = summary.at.replace(/[:.]/g, '-')
+  fs.writeFileSync(path.join(dir, `${langCode}-${provider}-${stamp}.json`), JSON.stringify(summary, null, 2))
+
+  const historyFile = path.join(dir, 'history.json')
+  const history = fs.existsSync(historyFile) ? JSON.parse(fs.readFileSync(historyFile, 'utf8')) : []
+  history.push({ at: summary.at, provider, model, lang: langCode, total, usable: usableCount, accuracy: `${dirtyPass}/${dirtyRows.length}`, clean: `${cleanPass}/${cleanRows.length}` })
+  fs.writeFileSync(historyFile, JSON.stringify(history.slice(-200), null, 2))
+
+  // Gate (exit code): contrato 100%, e as duas metades da acurácia —
+  //   • frase correta SEM correção (anti-alucinação) — tolera 1 scopo em 10;
+  //   • erro conhecido CORRIJÍVEL — mínimo `--min-accuracy` (padrão 0.5).
+  const minAccuracy = Number(flagValue('--min-accuracy') ?? '0.5')
+  const accuracyRate = dirtyRows.length > 0 ? dirtyPass / dirtyRows.length : 1
+  const cleanRate = cleanRows.length > 0 ? cleanPass / cleanRows.length : 1
+  const allowedCleanMiss = cleanRows.length >= 4 ? 1 : 0
+
+  const contractOk = usableCount === total
+  const accuracyOk = accuracyRate >= minAccuracy
+  const antiHallucinationOk = cleanRows.length === 0 || cleanPass >= cleanRows.length - allowedCleanMiss
+
   console.log(
     usableCount < total
       ? '\nAbaixo de 100% no contrato: confira o modelo (pequeno precisa de schema + retentativa) ou use o fallback determinístico — que só existe para inglês.\n'
       : '\nContratos íntegros: o app não precisará de fallback nesta rodada.\n'
   )
+  console.log(`gate: contrato=${contractOk} acurácia=${accuracyOk} (${Math.round(accuracyRate * 100)}% ≥ ${Math.round(minAccuracy * 100)}%) sem-alucinação=${antiHallucinationOk} (${cleanPass}/${cleanRows.length} = ${Math.round(cleanRate * 100)}%)`)
+  console.log(`histórico: eval-results/history.json\n`)
+
+  if (!(contractOk && accuracyOk && antiHallucinationOk)) process.exit(1)
 }
 
 main().catch((error) => {

@@ -47,3 +47,4 @@ coverage/
 .turbo/
 .electron/
 *.local
+eval-results/
