@@ -12,6 +12,7 @@
  */
 import type { CefrLevel } from '../shared/types'
 import { clampLevel, levelIndex } from './cefr'
+import { runtimeText } from './runtime-text'
 import { storedTrackPlanSchema, type ScenarioFeedbackOutput, type ScenarioOutput, type TrackPlanOutput } from './schemas'
 
 export type TrackBucket = 'interview' | 'travel' | 'work' | 'exam' | 'general'
@@ -519,6 +520,8 @@ export function normalizeTrackPlan(input: {
   objective: string
   level: CefrLevel
   seedFill?: boolean
+  /** M6 (B8): o título padrão é texto do aluno, não do app. */
+  nativeLang?: string | null
 }): TrackPlanOutput {
   const bucket = detectBucket(input.objective)
   const seed = BUCKETS[bucket]
@@ -563,7 +566,9 @@ export function normalizeTrackPlan(input: {
   }
 
   const result = {
-    title: (raw.title ?? '').trim() || (allowSeedFill ? seed.title : (input.objective.trim().slice(0, 60) || 'Trilha de foco')),
+    title:
+      (raw.title ?? '').trim() ||
+      (allowSeedFill ? seed.title : (input.objective.trim().slice(0, 60) || runtimeText(input.nativeLang, 'track.defaultTitle'))),
     goalTag: slug(raw.goalTag ?? '', bucket),
     lessons: filled.slice(0, MAX_LESSONS)
   }
@@ -614,12 +619,15 @@ export function isScenarioLesson(index: number, total: number): boolean {
  * mede a densidade de correções do caderno. O checklist volta vazio — a UI diz
  * que a rubrica é aproximada em vez de fingir que verificou critério por critério.
  */
-export function scenarioFeedbackFrom(input: {
-  studentTurns: string[]
-  criteria: string[]
-  corrections: number
-  words: number
-}): ScenarioFeedbackOutput {
+export function scenarioFeedbackFrom(
+  input: {
+    studentTurns: string[]
+    criteria: string[]
+    corrections: number
+    words: number
+  },
+  nativeLang: string | null = 'pt-BR'
+): ScenarioFeedbackOutput {
   const speech = input.studentTurns.join(' ').toLowerCase()
   const turns = input.studentTurns.filter((turn) => turn.trim().length > 0).length
 
@@ -638,21 +646,21 @@ export function scenarioFeedbackFrom(input: {
     languageScore,
     feedback: [
       turns < 3
-        ? 'Poucas falas suas no roleplay: na próxima, responda e devolva uma pergunta ao personagem.'
-        : `Você sustentou ${turns} falas no cenário (${input.words} palavras).`,
+        ? runtimeText(nativeLang, 'rubric.fewTurns')
+        : runtimeText(nativeLang, 'rubric.turns', { turns, words: input.words }),
       touched > 0
-        ? `Assuntos da tarefa reconhecidos na sua fala: ${touched} de ${input.criteria.length}.`
-        : 'A rubrica local não julga o sentido da tarefa — ela mede participação. Faça de novo e cite o assunto pedido.',
+        ? runtimeText(nativeLang, 'rubric.touched', { touched, total: input.criteria.length })
+        : runtimeText(nativeLang, 'rubric.noJudge'),
       input.corrections === 0
-        ? 'Nenhum erro de língua foi registrado.'
-        : `A língua teve ${input.corrections} correção(ões): elas já estão no seu caderno.`
+        ? runtimeText(nativeLang, 'rubric.noErrors')
+        : runtimeText(nativeLang, 'rubric.errors', { count: input.corrections })
     ].join(' '),
     criteriaMet: [],
     bestPhrases: [],
     followUpDrill:
       input.corrections > 0
-        ? 'Refaça por escrito suas três melhores falas do roleplay, aplicando as correções do caderno.'
-        : 'Repita o mesmo cenário falando uma frase a mais em cada resposta.'
+        ? runtimeText(nativeLang, 'rubric.drillCorrections')
+        : runtimeText(nativeLang, 'rubric.drillRepeat')
   }
 }
 

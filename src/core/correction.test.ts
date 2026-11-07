@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { bankCorrections, buildCorrectionReport, correctionPolicyPrompt, mergeCorrections } from './correction'
 import { interferenceRulesFor } from './interference'
 import { promptLocale } from './prompts'
+import type { Correction } from '../shared/types'
 
 describe('correção de texto livre', () => {
   it('usa o banco PT-BR sem precisar de IA', () => {
@@ -88,5 +89,45 @@ describe('abstração da correção por par', () => {
     const locale = promptLocale('ja', 'pt-BR')
     expect(correctionPolicyPrompt('explicit', locale)).toContain('português do Brasil')
     expect(correctionPolicyPrompt('recast', locale)).toContain('em japonês')
+  })
+})
+
+/** M6 (B5/B6): advisory não fabrica correção do aluno; merge é por contenção. */
+describe('merge e advisory (M6/B5/B6)', () => {
+  it('regra advisory não vira correção persistida com o right canônico do banco', () => {
+    const esRules = interferenceRulesFor('es', 'pt-BR')
+    // "embarazada" (grávida, não constrangida): detection anota…
+    const hits = bankCorrections('Estoy embarazada de hablar en público.', esRules)
+    // …mas a passada do banco NÃO devolve uma "correção" inventada — quem
+    // reescreve é o modelo.
+    expect(hits).toEqual([])
+  })
+
+  it('modelo que descreve a região inteira engole o fragmento do banco', () => {
+    const bank: Correction[] = [
+      { original: 'Where you are', corrected: 'Where are you', tag: 'question-word-order', source: 'bank' }
+    ]
+    const model: Correction[] = [
+      { original: 'Tell me where you are from', corrected: 'Tell me where you are from, please', tag: 'politeness', source: 'ai' }
+    ]
+
+    const merged = mergeCorrections(bank, model)
+    // A faixa do banco cabe dentro da do modelo → o modelo vence (senão o
+    // texto final sairia com as duas substituições brigando).
+    expect(merged).toHaveLength(1)
+    expect(merged[0].source).toBe('ai')
+  })
+
+  it('modelo repetindo trecho já coberto pelo banco é descartado', () => {
+    const bank: Correction[] = [
+      { original: 'I am developer', corrected: 'I am a developer', tag: 'articles', source: 'bank' }
+    ]
+    const model: Correction[] = [
+      { original: 'am developer', corrected: 'am a developer', tag: 'articles', source: 'ai' }
+    ]
+
+    const merged = mergeCorrections(bank, model)
+    expect(merged).toHaveLength(1)
+    expect(merged[0].source).toBe('bank')
   })
 })

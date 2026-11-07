@@ -62,3 +62,20 @@ describe('correção objetiva multilíngue', () => {
     expect(new Set(a).size).toBe(tokens.length)
   })
 })
+
+/** M6 (B7/B8): diacrítico com sentido e veredicto no idioma do aluno. */
+describe('normalização por idioma e veredicto localizado (M6/B7/B8)', () => {
+  it('vietnamita: tom é a palavra — "má" não se iguala a "ma"', () => {
+    expect(normalizeText('má', 'vi')).not.toBe(normalizeText('ma', 'vi'))
+    // e o padrão histórico (francês/alemão) continua tolerante a acento
+    expect(normalizeText('café', 'fr')).toBe(normalizeText('cafe', 'fr'))
+    expect(normalizeText('Ärger', 'de')).toBe(normalizeText('arger', 'de'))
+  })
+
+  it('veredicto sai no idioma nativo do perfil, não sempre em PT-BR', () => {
+    const key = { answer: 'dog' }
+    expect(gradeDeterministic('multiple_choice', key, 'cat', 'en')?.feedback).toContain('Not yet.')
+    expect(gradeDeterministic('multiple_choice', key, 'cat', 'pt-BR')?.feedback).toContain('Ainda não')
+    expect(gradeDeterministic('multiple_choice', key, 'dog', 'en')?.feedback).toBe('Correct!')
+  })
+})

@@ -1,9 +1,22 @@
 import type { CefrLevel, ExerciseType, GradeFeedback } from '../shared/types'
+import { runtimeText } from './runtime-text'
 
 export interface ExerciseAnswerKey {
   answer: string
   alternatives?: string[]
   explanation?: string
+}
+
+/**
+ * M6 (B7): em idiomas cujo diacrítico **define a palavra** (vietnamita: "ma" ≠
+ * "má" ≠ "mà"), apagar `\u0300-\u036F` transforma um erro de tom em resposta
+ * certa. A política mora no registro de idiomas; o padrão histórico (apagar
+ * acentos latinos/harakat) vale para fr/de/en e todos os demais.
+ */
+const SIGNIFICANT_DIACRITICS = new Set(['vi', 'vi-VN'])
+
+export function diacriticsAreSignificant(lang: string | null | undefined): boolean {
+  return lang != null && SIGNIFICANT_DIACRITICS.has(lang)
 }
 
 /**
@@ -14,14 +27,15 @@ export interface ExerciseAnswerKey {
  * deveriam se igualar). Agora preserva `\p{L}`/`\p{N}` de qualquer escrita,
  * mantém a tolerância a acentos latinos (NFD + stripping), remove diacríticos
  * combinantes (harakat árabe etc.), marcas bidi/zero-width e pontuação.
+ * M6 (B7): o stripping de acentos é ligado/desligado por idioma.
  */
-export function normalizeText(text: string): string {
-  return text
-    .normalize('NFD')
-    // Remove apenas diacríticos *não portadores de sentido*: acentos latinos e
-    // harakat/niqqud. O dakuten do japonês (で = と+◌゙) é sentido — NFD+strip
-    // geral de \p{M} transformaria 'です' em 'てす'. NFC no fim remontas Hangul.
-    .replace(/[\u0300-\u036f\u0591-\u05AF\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08FF]/g, '')
+export function normalizeText(text: string, lang?: string | null): string {
+  const decomposed = text.normalize('NFD')
+  const stripped = diacriticsAreSignificant(lang)
+    ? decomposed
+    : decomposed.replace(/[\u0300-\u036f\u0591-\u05AF\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08FF]/g, '')
+
+  return stripped
     .normalize('NFC')
     .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u061C\u070F]/g, '')
     .replace(/[’‘]/g, "'")
@@ -32,46 +46,51 @@ export function normalizeText(text: string): string {
     .trim()
 }
 
-function matches(answerKey: ExerciseAnswerKey, response: string): boolean {
-  const target = normalizeText(response)
+function matches(answerKey: ExerciseAnswerKey, response: string, lang?: string | null): boolean {
+  const target = normalizeText(response, lang)
   if (!target) return false
 
   return [answerKey.answer, ...(answerKey.alternatives ?? [])]
     .filter(Boolean)
-    .some((candidate) => normalizeText(candidate) === target)
+    .some((candidate) => normalizeText(candidate, lang) === target)
 }
 
 /**
  * Corrige localmente os tipos objetivos. Retorna null quando a resposta
  * precisa de avaliação por IA (tradução livre ou produção livre).
+ *
+ * M6 (B8): o veredicto sai no idioma do aluno (`nativeLang`) — sem isto um
+ * falante de inglês estudando espanhol recebia 'Correto!' em português.
  */
 export function gradeDeterministic(
   type: ExerciseType,
   answerKey: ExerciseAnswerKey,
-  response: string
+  response: string,
+  nativeLang: string | null = 'pt-BR',
+  lang?: string | null
 ): GradeFeedback | null {
   const explanation = answerKey.explanation?.trim()
 
   if (type === 'multiple_choice' || type === 'cloze' || type === 'order') {
-    const correct = matches(answerKey, response)
+    const correct = matches(answerKey, response, lang)
     return {
       correct,
       score: correct ? 1 : 0,
       feedback: correct
-        ? 'Correto!'
+        ? runtimeText(nativeLang, 'grade.correct')
         : explanation
-          ? `Ainda não. ${explanation}`
-          : 'Ainda não. Compare com a resposta esperada e tente de novo.',
+          ? runtimeText(nativeLang, 'grade.explanation', { explanation })
+          : runtimeText(nativeLang, 'grade.compare'),
       corrected: correct ? response : answerKey.answer,
       errorTags: correct ? [] : [type === 'cloze' ? 'grammar' : type === 'order' ? 'word-order' : 'accuracy']
     }
   }
 
-  if (type === 'translate' && matches(answerKey, response)) {
+  if (type === 'translate' && matches(answerKey, response, lang)) {
     return {
       correct: true,
       score: 1,
-      feedback: 'Correto! Tradução natural.',
+      feedback: runtimeText(nativeLang, 'grade.translateCorrect'),
       corrected: response,
       errorTags: []
     }

@@ -270,7 +270,7 @@ export async function createTrackDraft(
       user: prompt.user,
       temperature: 0.35
     })
-    plan = draftOf(normalizeTrackPlan({ raw, objective, level, seedFill: offlineReady }), objective, level, 'ai')
+    plan = draftOf(normalizeTrackPlan({ raw, objective, level, seedFill: offlineReady, nativeLang: profile.nativeLang }), objective, level, 'ai')
   } catch (error) {
     if (!offlineReady) {
       throw new Error(

@@ -402,12 +402,16 @@ export async function finishScenarioRun(
   } catch (error) {
     console.warn('[scenario] rubrica por IA indisponível, usando rubrica local:', errorMessage(error))
 
-    const local = scenarioFeedbackFrom({
-      studentTurns: studentRows.map((row) => row.content),
-      criteria: scenario.successCriteria,
-      corrections: corrections.length,
-      words
-    })
+    const local = scenarioFeedbackFrom(
+      {
+        studentTurns: studentRows.map((row) => row.content),
+        criteria: scenario.successCriteria,
+        corrections: corrections.length,
+        words
+      },
+      // M6 (B8): a rubrica local fala a língua do aluno.
+      profile.nativeLang
+    )
 
     contentScore = local.contentScore
     languageScore = local.languageScore

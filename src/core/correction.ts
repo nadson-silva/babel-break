@@ -41,20 +41,33 @@ function compact(value: string): string {
  * par nativo→alvo (`interferenceRulesFor`); sem banco para o par, passe `[]` e
  * a correção fica inteira com a IA — essa é a abstração do M4 (banco manual vs.
  * IA). O default histórico é o banco PT-BR→inglês (fixture de qualidade).
+ *
+ * M6 (B5): regras advisory ficam de fora. `rule.right` é o exemplo canônico do
+ * banco, não uma reescrita do texto do aluno — persisti-lo como "a correção da
+ * frase dele" fabricava correção; quem reescreve aqui é o modelo.
  */
 export function bankCorrections(text: string, rules: InterferenceRule[] = INTERFERENCE_BANK): Correction[] {
-  return detectInterference(text, rules).map((hit) => ({
-    original: hit.original,
-    corrected: hit.corrected,
-    tag: normalizeTag(hit.tag),
-    note: hit.note,
-    source: 'bank' as const
-  }))
+  return detectInterference(text, rules)
+    .filter((hit) => !hit.advisory)
+    .map((hit) => ({
+      original: hit.original,
+      corrected: hit.corrected,
+      tag: normalizeTag(hit.tag),
+      note: hit.note,
+      source: 'bank' as const
+    }))
 }
 
 /**
  * Junta a passada do banco com a do modelo. O banco manda quando os dois
  * apontam o mesmo trecho; o modelo acrescenta o que o banco não conhece.
+ *
+ * M6 (B6): a decisão é por **contenção de string**, não por interseção de
+ * faixas. Se o trecho do banco está contido no trecho do modelo, o modelo
+ * reescreve a região inteira e engole o fragmento (senão uma correção curta
+ * do banco ocultaria a substituição longa do modelo, ou vice-versa, deixando
+ * o texto final inconsistente); se o trecho do modelo cabe num que já existe,
+ * ele é descartado.
  */
 export function mergeCorrections(bank: Correction[], model: Correction[]): Correction[] {
   const merged: Correction[] = []
@@ -69,18 +82,24 @@ export function mergeCorrections(bank: Correction[], model: Correction[]): Corre
     if (!original || !corrected) continue
     if (compact(original) === compact(corrected)) continue
 
-    const covered = merged.some(
-      (entry) => compact(entry.original).includes(compact(original)) || compact(original).includes(compact(entry.original))
-    )
+    const key = compact(original)
+
+    // Alguma correção existente cobre este trecho por inteiro? Então não entra.
+    const covered = merged.some((entry) => compact(entry.original).includes(key))
     if (covered) continue
 
-    merged.push({
+    // O modelo descreve uma região que engole fragmentos do banco: ele vence.
+    const swallowed = merged.filter((entry) => key.includes(compact(entry.original)))
+    const kept = merged.filter((entry) => !swallowed.includes(entry))
+    kept.push({
       original,
       corrected,
       tag: normalizeTag(correction.tag || 'general'),
       note: correction.note?.trim() || undefined,
       source: 'ai'
     })
+    merged.length = 0
+    merged.push(...kept)
   }
 
   return merged.slice(0, 6)

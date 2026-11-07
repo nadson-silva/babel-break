@@ -26,6 +26,12 @@ export interface InterferenceRule {
   find: RegExp
   /** Reescrita determinística. Ausente = regra advisory (só anota). */
   to?: string | ((match: RegExpMatchArray) => string)
+  /**
+   * M6 (B4): filtro de falso positivo. Recebe o texto ANTES da ocorrência e
+   * decide se ela conta. Padrões que só são erro em pergunta direta (inversão
+   * de ordem) precisam desta âncora — embutida, a mesma ordem é gramatical.
+   */
+  guard?: (before: string) => boolean
   /** Exemplo canônico errado (fixture de prompt e do app). */
   wrong: string
   /** Exemplo canônico certo. */
@@ -141,6 +147,15 @@ const LESS_ALT = COUNTABLE_LESS.join('|')
 
 function article(noun: string): string {
   return /^[aeiou]/i.test(noun) ? 'an' : 'a'
+}
+
+const SENTENCE_EDGE = /(^|[.!?;:])\s*["'“”]?\s*$/
+
+/** M6 (B4): pergunta direta = wh-clause no começo do texto/frase. Em posição
+ * embaralhadamente embutida ("I know where he is"), a ordem declarativa é
+ * CORRETA em inglês, e a regra não pode reescrevê-la. */
+function directQuestionOnly(before: string): boolean {
+  return SENTENCE_EDGE.test(before)
 }
 
 export const INTERFERENCE_BANK: InterferenceRule[] = [
@@ -337,6 +352,9 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     find:
       /\b(what|where|when|why|how|who)\s+(you|he|she|it|they|we|this|that)\s+(are|is|do|does|did|can|could|will|would)\b/gi,
     to: (match) => `${match[1]} ${match[3]} ${match[2]}`,
+    // M6 (B4): só anota/reescreve em pergunta DIRETA. "I know where he is" é
+    // pergunta embutida e gramatical — a regra antiga inseria erro nela.
+    guard: directQuestionOnly,
     wrong: 'Where you are from?',
     right: 'Where are you from?',
     note: 'Pergunta em inglês inverte auxiliar e sujeito (o português só muda a entonação).'
@@ -677,7 +695,14 @@ export function detectInterference(text: string, rules: InterferenceRule[] = INT
   const hits: InterferenceHit[] = []
 
   for (const rule of rules) {
-    const match = globalize(rule).exec(text)
+    const re = globalize(rule)
+    let match: RegExpExecArray | null = null
+    while ((match = re.exec(text)) !== null) {
+      // M6 (B4): ocorrências em contexto protegido pela guarda não contam;
+      // segue para a próxima até achar uma que passa (ou esgota a regex).
+      if (rule.guard && !rule.guard(text.slice(0, match.index))) continue
+      break
+    }
     if (!match || !match[0].trim()) continue
 
     const original = match[0].trim()
@@ -705,6 +730,13 @@ export function recast(text: string, rules: InterferenceRule[] = INTERFERENCE_BA
     if (!rule.to) continue
     output = output.replace(globalize(rule), (...args: unknown[]) => {
       const match = args as unknown as RegExpMatchArray
+      // M6 (B4): a mesma guarda da detecção — recast não pode inserir erro em
+      // pergunta embutida correta.
+      if (rule.guard) {
+        const subject = String(args[args.length - 1] ?? '')
+        const offset = Number(args[args.length - 2] ?? 0)
+        if (!rule.guard(subject.slice(0, offset))) return String(args[0] ?? '')
+      }
       const next = replaceWith(rule, match)
       return next || (args[0] as string)
     })

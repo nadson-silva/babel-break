@@ -1062,7 +1062,9 @@ export async function answerExercise(input: {
 
   if (!response) throw new Error('Escreva ou monte uma resposta antes de verificar.')
 
-  let feedback = gradeDeterministic(type, answerKey, response)
+  // M6 (B7/B8): veredicto no idioma do aluno, e a comparacão de texto respeita
+  // idiomas cujo diacrítico define a palavra (vietnamita).
+  let feedback = gradeDeterministic(type, answerKey, response, profile.nativeLang, profile.targetLang)
   let gradedBy: Correction['source'] = 'local'
 
   if (!feedback) {
@@ -1093,7 +1095,7 @@ export async function answerExercise(input: {
       }
     } catch {
       // Sem IA, o veredito é o gabarito — e a frase é do idioma do aluno (M5).
-      const correct = normalizeText(response) === normalizeText(answerKey.answer)
+      const correct = normalizeText(response, profile.targetLang) === normalizeText(answerKey.answer, profile.targetLang)
       feedback = {
         correct,
         score: correct ? 1 : 0,

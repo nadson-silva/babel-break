@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  INTERFERENCE_BANK,
   PT_ES_INTERFERENCE_BANK,
   bankEntries,
   detectInterference,
@@ -133,5 +134,42 @@ describe('bancos por par (M4)', () => {
       expect(entry.right.length).toBeGreaterThan(3)
       expect(entry.note.length).toBeGreaterThan(8)
     }
+  })
+})
+
+/**
+ * M6 (B4): testes de falso positivo por regra — o `right` canônico de cada
+ * regra é inglês/espanhol CORRETO e não pode acender a própria regra (nem
+ * outra). E a inversão de pergunta só vale em pergunta DIRETA: embutida, a
+ * ordem declarativa é gramatical.
+ */
+describe('banco sem falso positivo (M6/B4)', () => {
+  it('nenhuma re-grava sua própria forma canônica (banco EN)', () => {
+    for (const rule of INTERFERENCE_BANK) {
+      const hits = detectInterference(rule.right)
+      expect(hits.map((hit) => hit.ruleId), `${rule.id} em "${rule.right}"`).not.toContain(rule.id)
+    }
+  })
+
+  it('nenhuma re-grava sua própria forma canônica (banco ES)', () => {
+    for (const rule of PT_ES_INTERFERENCE_BANK) {
+      const hits = detectInterference(rule.right, PT_ES_INTERFERENCE_BANK)
+      expect(hits.map((hit) => hit.ruleId), `${rule.id} em "${rule.right}"`).not.toContain(rule.id)
+    }
+  })
+
+  it('pergunta embutida correta não é reescrita', () => {
+    expect(detectInterference('I know where he is.')).toHaveLength(0)
+    expect(detectInterference('Tell me what you can do.')).toHaveLength(0)
+    expect(recast('I know where he is.')).toBe('I know where he is.')
+    expect(recast('I wonder what she wants.')).toBe('I wonder what she wants.')
+  })
+
+  it('pergunta diretainvertida continua sendo consertada', () => {
+    const hits = detectInterference('Where you are from?')
+    expect(hits.some((hit) => hit.ruleId === 'question-word-order')).toBe(true)
+    expect(recast('Where you are from?')).toBe('Where are you from?')
+    // Depois de pontuação também é borda de frase.
+    expect(recast('Hi. Where you are going?')).toBe('Hi. Where are you going?')
   })
 })

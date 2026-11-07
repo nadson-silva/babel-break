@@ -1,6 +1,7 @@
 import type { CefrLevel } from '../shared/types'
 import type { ErrorFocusEntry } from './adapt'
 import { DEFAULT_LOCALE, type PromptLocale } from './prompts'
+import { runtimeTextForLocale } from './runtime-text'
 import { clozeFromExample } from './srs'
 import { tokenize } from './languages'
 import { bankEntries } from './interference'
@@ -304,10 +305,32 @@ function focusEntries(errors: ErrorFocusEntry[]): ErrorFocusEntry[] {
   return bankEntries().slice(0, 3).map(toBankFocus)
 }
 
-function shuffle<T>(items: T[]): T[] {
+/**
+ * M6 (B12): shuffle com seed — a mesma lição gera o mesmo bloco de exercícios.
+ * Com `Math.random` puro, pré-geração e abertura do aluno produziam dois
+ * baralhos diferentes para a mesma lição (e a regeneração não era reprodutível).
+ */
+function hashSeed(value: string): number {
+  let hash = 2166136261
+  for (const char of value) {
+    hash ^= char.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 16777619)
+  }
+  return hash >>> 0
+}
+
+function shuffle<T>(items: T[], seed: number): T[] {
+  let state = seed
+  const next = (): number => {
+    state = (state + 0x6d2b79f5) | 0
+    let t = Math.imul(state ^ (state >>> 15), 1 | state)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+
   const copy = [...items]
   for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swap = Math.floor(Math.random() * (index + 1))
+    const swap = Math.floor(next() * (index + 1))
     ;[copy[index], copy[swap]] = [copy[swap], copy[index]]
   }
   return copy
@@ -351,13 +374,13 @@ function orderFromFocus(entry: ErrorFocusEntry, locale: PromptLocale): Generated
 
   return {
     type: 'order',
-    instruction: `Reconstrua a frase correta (área: ${entry.tag}).`,
-    prompt: entry.note ?? `Monte a frase correta em ${locale.targetName}.`,
+    instruction: runtimeTextForLocale(locale, 'fb.orderFocus.instruction', { tag: entry.tag }),
+    prompt: entry.note ?? runtimeTextForLocale(locale, 'fb.orderFocus.prompt', { target: locale.targetName }),
     options: [],
     tokens,
     answer: sentence,
     alternatives: [],
-    explanation: `Forma correta: "${sentence}".`,
+    explanation: runtimeTextForLocale(locale, 'fb.orderFocus.explanation', { sentence }),
     targetTags: [entry.tag]
   }
 }
@@ -369,13 +392,13 @@ function spotError(entry: ErrorFocusEntry, locale: PromptLocale): GeneratedExerc
 
   return {
     type: 'multiple_choice',
-    instruction: 'Escolha a frase correta.',
-    prompt: `Qual destas frases está certa em ${locale.targetName}? (área: ${entry.tag})`,
-    options: shuffle(options),
+    instruction: runtimeTextForLocale(locale, 'fb.spotError.instruction'),
+    prompt: runtimeTextForLocale(locale, 'fb.spotError.prompt', { target: locale.targetName, tag: entry.tag }),
+    options: shuffle(options, hashSeed(entry.original)),
     tokens: [],
     answer: entry.corrected,
     alternatives: [],
-    explanation: entry.note ?? `"${entry.corrected}" é a forma natural.`,
+    explanation: entry.note ?? runtimeTextForLocale(locale, 'fb.spotError.explanation', { sentence: entry.corrected }),
     targetTags: [entry.tag]
   }
 }
@@ -385,70 +408,85 @@ export function fallbackExercises(
   errors: ErrorFocusEntry[] = [],
   locale: PromptLocale = DEFAULT_LOCALE
 ): ExerciseSetOutput {
+  // M6 (B12): guardas — `vocab[1..3]` e `examples[0]` eram lidos sem checar
+  // tamanho; conteúdo degenerado (vocabulário vazio) derrubava a geração.
   const vocab = content.vocabulary.slice(0, 4)
-  const focus = focusEntries(errors)
   const first = content.examples[0]
+  if (!first || vocab.length === 0) return { exercises: [] }
+
+  const focus = focusEntries(errors)
   const second = content.examples[1] ?? content.examples[0]
   const cloze = vocabCloze(content.vocabulary, locale) ?? missingWord(first.target)
   const orderTokens = tokenizeFor(second.target, locale.target.code)
 
-  const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))])
-  const optionsB = shuffle([...new Set([vocab[1].translation, vocab[0].translation, vocab[2].translation, vocab[3].translation])])
+  // M6 (B12): seed derivada da lição — a mesma lição sempre baralha do mesmo
+  // jeito (pré-geração e abertura não produzem dois baralhos diferentes).
+  const pick = (index: number) => vocab[index % vocab.length]
+  const seed = hashSeed(`${content.title}|${content.objective}`)
+
+  const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))], seed)
+  const optionsB = shuffle(
+    [...new Set([pick(1).translation, pick(0).translation, pick(2).translation, pick(3).translation])],
+    seed + 1
+  )
 
   const exercises: GeneratedExercise[] = [
     {
       type: 'multiple_choice',
-      instruction: 'Escolha a tradução correta.',
-      prompt: `O que significa "${vocab[0].term}"?`,
+      instruction: runtimeTextForLocale(locale, 'fb.mcTranslation.instruction'),
+      prompt: runtimeTextForLocale(locale, 'fb.mcTranslation.prompt', { term: vocab[0].term }),
       options: optionsA,
       tokens: [],
       answer: vocab[0].translation,
       alternatives: [],
-      explanation: `"${vocab[0].term}" significa "${vocab[0].translation}".`,
+      explanation: runtimeTextForLocale(locale, 'fb.mcTranslation.explanation', {
+        term: vocab[0].term,
+        translation: vocab[0].translation
+      }),
       targetTags: []
     },
     {
       type: 'cloze',
-      instruction: 'Complete a frase com a palavra que falta; a tradução dela está entre parênteses.',
+      instruction: runtimeTextForLocale(locale, 'fb.cloze.instruction'),
       prompt: cloze.prompt,
       options: [],
       tokens: [],
       answer: cloze.answer,
       alternatives: [],
-      explanation: 'Leia a frase completa para conferir o sentido.',
+      explanation: runtimeTextForLocale(locale, 'fb.cloze.explanation'),
       targetTags: []
     },
     {
       type: 'order',
-      instruction: 'Ordene as palavras para formar a frase.',
-      prompt: 'Monte a frase correta.',
+      instruction: runtimeTextForLocale(locale, 'fb.order.instruction'),
+      prompt: runtimeTextForLocale(locale, 'fb.order.prompt'),
       options: [],
       tokens: orderTokens,
       answer: second.target,
       alternatives: [],
-      explanation: 'Observe a ordem sujeito + verbo + complemento.',
+      explanation: runtimeTextForLocale(locale, 'fb.order.explanation'),
       targetTags: []
     },
     {
       type: 'translate',
-      instruction: `Traduza a frase para o ${locale.targetName}.`,
+      instruction: runtimeTextForLocale(locale, 'fb.translate.instruction', { target: locale.targetName }),
       prompt: second.native,
       options: [],
       tokens: [],
       answer: second.target,
       alternatives: [],
-      explanation: `Compare sua tradução com a versão em ${locale.targetName}.`,
+      explanation: runtimeTextForLocale(locale, 'fb.translate.explanation', { target: locale.targetName }),
       targetTags: focus[0] ? [focus[0].tag] : []
     },
     {
       type: 'free_production',
-      instruction: `Escreva uma resposta curta usando o conteúdo da lição.`,
-      prompt: `Escreva 2 frases sobre: ${content.objective}`,
+      instruction: runtimeTextForLocale(locale, 'fb.free.instruction'),
+      prompt: runtimeTextForLocale(locale, 'fb.free.prompt', { topic: content.objective }),
       options: [],
       tokens: [],
       answer: `${first.target} ${second.target}`,
       alternatives: [],
-      explanation: `Use o vocabulário e a estrutura que você praticou em ${locale.targetName}.`,
+      explanation: runtimeTextForLocale(locale, 'fb.free.explanation', { target: locale.targetName }),
       targetTags: focus[1] ? [focus[1].tag] : []
     }
   ]
@@ -460,13 +498,16 @@ export function fallbackExercises(
   else {
     exercises.push({
       type: 'multiple_choice',
-      instruction: 'Escolha a tradução correta.',
-      prompt: `O que significa "${vocab[1].term}"?`,
+      instruction: runtimeTextForLocale(locale, 'fb.mcTranslation.instruction'),
+      prompt: runtimeTextForLocale(locale, 'fb.mcTranslation.prompt', { term: pick(1).term }),
       options: optionsB,
       tokens: [],
-      answer: vocab[1].translation,
+      answer: pick(1).translation,
       alternatives: [],
-      explanation: `"${vocab[1].term}" significa "${vocab[1].translation}".`,
+      explanation: runtimeTextForLocale(locale, 'fb.mcTranslation.explanation', {
+        term: pick(1).term,
+        translation: pick(1).translation
+      }),
       targetTags: []
     })
   }
