@@ -226,7 +226,8 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim | ✅ concluído |
 | **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência | ✅ concluído |
 | **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ⏭ próximo |
-| **M4 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | — |
+| **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | — |
+| **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | — |
 | **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
 
 Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
