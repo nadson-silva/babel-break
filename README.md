@@ -103,7 +103,34 @@ API). Sem sessão diária, streak ou meta obrigatória — você estuda quando q
       rótulos de intervalo do FSRS, cards, motivo da sugestão, erros de geração) agora sai
       no idioma das explicações do perfil — sem dicionário para o idioma, cai em inglês
 
-Próximo: v2 — voz (TTS + pronúncia), múltiplos perfis, export/import.
+Próximo: **M6 (pré-v2)** — rede de proteção, bugs do loop e dívidas de contrato; depois a v2 —
+voz (TTS + pronúncia), múltiplos perfis, export/import.
+
+## Débito conhecido antes da v2
+
+A auditoria de 2026-11-07 (M5 concluído, commit `d3eac37`) abriu o milestone **M6 — pré-v2** com
+o checklist completo em [PLAN.md §12](./PLAN.md). Os itens visíveis para quem usa o app hoje:
+
+- a fila de revisão **pula cards**: o componente avança o índice e a tela também remove o card da
+  fila (`ReviewQueue.tsx:73` + os 4 consumidores) — os cards alternados nunca aparecem;
+- fechar uma conversa pode **encerrar a sessão de estudo de outra** (`tutor.ts:766-784` não filtra
+  por `conversationId`);
+- "Encerrar sessão" na sessão guiada **não abandona** a sessão, que volta a ser oferecida na home;
+- o banco de interferência PT-BR→inglês tem regras que **casam frases corretas**: "I know where he
+  is" sai "corrigido" para "I know where is he" (`interference.ts:334-342`);
+- nenhum request de IA tem **timeout**: um request pendurado trava a pré-geração até reiniciar o
+  app (`ai.ts:83-99` não volta a zerar o contador de requisições em voo);
+- conteúdo em cache **não tem versão de schema/prompt** — renomear um campo em v2 apodrece o banco
+  de quem já usa (o `en/pt → target/native` do M4 foi remendado com shim);
+- falha de pré-condição no chat deixa o **"Pensando…" permanente** (o `tutor:send` não checa o
+  resultado);
+- sem CI, sem lint, sem `LICENSE`; e `scripts/eval.mjs` **divergiu dos contratos reais** e pontua
+  alucinação como sucesso: uma frase correta com `expect: ''` falha quando o modelo acertadamente
+  não corrige nada (`eval.mjs:626`).
+
+O que a auditoria confirmou estar sólido, e que a M6 preserva: typecheck limpo, 240 testes, zero
+`any`, migrações aditivas, `contextIsolation`, e a degradação honesta quando não há IA para o
+idioma-alvo.
 
 ## Requisitos
 

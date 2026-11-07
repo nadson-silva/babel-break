@@ -230,7 +230,8 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ✅ concluído |
 | **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ✅ concluído |
 | **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | ✅ concluído |
-| **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
+| **M6 — pré-v2** (3–5 d) | rede de proteção (startup + log + CI), bugs do loop, mutex de geração, timeout/backoff, `schemaVersion`, FK e índices, validação na fronteira IPC | revisão não pula card; fechar conversa A não encerra B; nenhum request de IA sem deadline; banco sobrevive a migração falha com backup; `npm run eval` com gate de regressão | ⬜ aberto |
+| **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | depende do M6 |
 
 Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
 determinística offline), `core/srs.ts` + `ts-fsrs` (cards por template e agendamento FSRS),
@@ -302,13 +303,137 @@ construí-las primeiro significaria construir tudo duas vezes.
 - **Roleplay subjetivo** → rubrica de conteúdo por checklist + score de língua separado.
 - **Frequência livre pode reduzir retenção** → recomendação não coercitiva ("continuar de onde parei", próximo passo sugerido), progresso visível, lembrete opt-in. Nunca streak quebrado, culpa ou meta expirada.
 - **Harness de eval** a partir do M2: ~20 tarefas golden por idioma, medindo taxa de JSON inválido, latência e acurácia de correção. `scripts/eval.mjs` manual, não CI — no M5 ganhou `--lang` (en/es/ja/ar), checagem de escrita (CJK/RTL) e `--offline`.
+- **Cache sem versão** → `promptVersion`/`schemaVersion` carimbado em todo conteúdo gravado; versão divergente conta como `stale` e vai pela fila de aquecimento, nunca por shim à mão.
+- **Geração dupla paga em dobro** → mutex por lição (o padrão já existe em `curriculumJob`) e `aiInFlight` incluindo streaming; sem isso a pré-geração compete com o aluno.
+- **Request sem deadline** → `AbortSignal.timeout` em toda chamada de IA + backoff com jitter; um request pendurado hoje trava a fila ociosa permanentemente (`inFlight` nunca volta a 0).
+- **Frontera IPC confiável** → zod nos 57 canais + escopo por `profileId`; é pré-requisito de múltiplos perfis, não higiene.
 
-## 12. Fora de escopo na v1
+## 12. Débito pré-v2 (auditoria em 2026-11-07, commit d3eac37)
+
+A v2 (voz, múltiplos perfis, export/import) **amplifica** os itens abaixo em vez de expô-los a
+zero: voz depende de deadline/cancelamento e de `schemaVersion`; múltiplos perfis dependem de
+escopo por `profileId` nos handlers e de FK; export/import depende de payload versionado. Por
+isso eles vêm **antes** da v2, não durante. Cada item tem a evidência em `arquivo:linha`.
+
+Base sólida que a auditoria manda preservar: 240 testes, typecheck limpo, zero `any`, migrações
+0000–0005 aditivas, `contextIsolation` correto, `parseSchedule` (`core/srs.ts`) como modelo de
+leitura tolerante de JSON, e a degradação honesta para idioma ≠ inglês.
+
+### Lote 0 — rede de proteção (barato, destrava o resto)
+
+- [ ] **B1** fila de revisão pula cards: `ReviewQueue.tsx:73` avança o índice e os 4 pais
+      (`ReviewScreen.tsx:46-53`, `LessonScreen.tsx:58-65`, `TutorScreen.tsx:112-118`,
+      `GuidedScreen.tsx:94-102`) também removem o card do array — um dos dois tem que ceder. Um
+      teste da interação (jsdom) — hoje nenhum `.tsx` é testável (`vitest.config.mts`).
+- [ ] **B2** `closeConversation` filtra por `conversationId` (`tutor.ts:766-784`) e guarda
+      `closedAt IS NULL`; sem dupla reestimativa em `scenario.ts:431` + `guided.ts:356`.
+- [ ] **B3** "Encerrar sessão" chama `guided:abandon` (`GuidedScreen.tsx:149` só renderiza o
+      rótulo; `loop.ts:116` tem o handler sem call site na UI).
+- [ ] **C4** `whenReady().catch` + backup do `.db*` antes da migração + `integrity_check` +
+      handlers de `unhandledRejection`/`uncaughtException` (`index.ts:67-81`).
+- [ ] **C10** log rotativo em `main.log` (userData) + canal `log:get-path`; bug report da v2
+      precisa ter o que investigar (hoje: 14 `console.warn` para o nada de um AppImage).
+- [ ] **E1** um `ErrorBoundary` envolvendo a área de telas — há non-null assertions vivas
+      (`HomeScreen.tsx:250,270,295,330`, `LessonScreen.tsx:171`) em app de janela única.
+- [ ] **D2** envelope `{ok,data} | {ok,error}` único + zod nos **57** canais (a validação já é o
+      pré-requisito de múltiplos perfis: `reports.ts:257` e `learning.ts:961-967` não escopam).
+- [ ] **B9** `tutor:send` checa `result.ok` — hoje falha de pré-condição deixa "Pensando…" eterno
+      (`tutor.ts:455-461`, `loop.ts:65-67`, `TutorPanel.tsx:177-191`).
+- [ ] **F3/F7** CI (typecheck + vitest), LICENSE, CHANGELOG, `repository:` no package.json.
+
+### Lote 1 — consertar o loop e parar de queimar API
+
+- [ ] **B4/B5/B6** banco de interferência: `question-word-order` (`interference.ts:334-342`) casa
+      pergunta embutida correta e **insere** erro — "I know where he is" vira "I know where is he";
+      advisory (`interference.ts:647-648`) **não** persiste `rule.right` como correção do aluno;
+      `mergeCorrections` (`correction.ts:72-76`) compara faixas de sobreposição, não contenção de
+      string; testes de falso positivo por regra.
+- [ ] **B7** `normalizeText` (`grading.ts:23`) não apaga `\u0300-\u036F` para vi/fr/de (tabela por
+      idioma em `core/languages.ts`); **B8** veredictos (`grading.ts:61-74`) e textos de
+      `fallback.ts:354-471`/`tracks.ts:566,637-651` passam por `runtime-text` — nada de
+      `'Correto!'` em português para L1 inglês.
+- [ ] **C1** mutex por lição em `ensureLessonGenerated` (`learning.ts:464-749`), no formato de
+      `curriculumJob` (`:320-398`); **C2** `inFlight` (`ai.ts:83,99`) também no streaming do tutor,
+      senão `prewarm.ts:243` compete com quem conversa; **C3** `AbortSignal.timeout` em todo
+      `GenerateRequest` + backoff com jitter e sem retentativa em 429 (`ai.ts:79`) — hoje um
+      request pendurado bloqueia a pré-geração **para sempre**.
+- [ ] **D1** `promptVersion`/`schemaVersion` carimbado em `lessonContent`/`exerciseSet`; cache com
+      versão divergente conta como `stale` (não como shim, como foi o `en/pt → target/native` em
+      `learning.ts:110-121`). **Pré-requisito de export/import.**
+- [ ] **D3/D4** schemas fecham o contrato do prompt: `options.length(4)` + **`answer ∈ options`**
+      (`schemas.ts:93-104`), `length(10)` em placement, `criteriaMet.length ===
+      successCriteria.length`, `max` por string, e `normalizeTrackPlan` (`tracks.ts:517-570`)
+      revalida no zod antes de persistir.
+- [ ] **D5** delimitador (`"""…"""`) em todo texto do aluno/modelo interpolado em prompt de
+      contrato JSON (`prompts.ts:87,306,367,390,410`).
+- [ ] **C5/C6/C7** migração aditiva de índices nos caminhos quentes (hoje há **um** índice no
+      schema inteiro, `schema.ts:146`) + FK com `ON DELETE CASCADE` nas arestas de risco
+      (`attempts→exercises`, `reviews→cards`, `messages→conversations`, `lesson_items→lessons`) +
+      `db.transaction` nos ~14 fluxos multi-write — o de `submitReport`/`undoReport`
+      (`reports.ts:219-305`) é o que deixa estado não-annulável.
+- [ ] **E4** streaming: `scrollIntoView` por token (`TutorPanel.tsx:159-161`) impede ler o que já
+      passou; `ChatEvent` (`shared/types.ts:71-81`) não tem `conversationId` e o ramo de
+      `corrections` (`:115-127`) ignora `requestId` — trocar de conversa no meio de um turno joga
+      correção no chat errado.
+- [ ] **E9** cancelamento com nome e progresso para geração longa (só o chat tem `tutor:cancel`),
+      reaproveitando o padrão do `curriculumJob`.
+- [ ] **B12/C9** guardas em `fallback.ts:396,464-471` (`vocab[1..3]` sem checar tamanho) e
+      shuffle com seed; agregados no SQL + retenção de `reviews`/`attempts` (o painel lê tabelas
+      inteiras, `dashboard.ts:93-136`).
+- [ ] **F1/F2** `scripts/eval.mjs` importa os prompts/schemas reais; corrige a inversão de
+      clean-sentence (`eval.mjs:626` — hoje **pontua alucinação como sucesso**: frase correta com
+      `expect:''` falha quando o modelo não corrige nada); goldens derivados de `bankEntries()`;
+      o golden `be-have` (`:65`) não existe no banco (`interference.ts:149` = `have-vs-be`); JSON
+      de resultados com histórico e **exit code com gate**; `npm run eval`.
+- [ ] **E2/E3/E5** `isComposing` nos dois inputs (`TutorPanel.tsx:246-251`,
+      `TracksScreen.tsx:414` — crítico para ja/zh/ko), `role="alert"`/`aria-current`/
+      `aria-pressed` (zero `aria-live` no renderer hoje), breakpoint do Tutor (940–1023px deixa o
+      app sem lista de conversas: `index.ts:24` vs. `TutorScreen.tsx:129`).
+- [ ] **F4/F5** `noUncheckedIndexedAccess` nos tsconfigs (teria pego `vocab[1]`,
+      `PAST_TO_BASE[match[1]]`, `RATING_BY_REVIEW[rating]` em compile); `publish: null` ou
+      electron-updater com o repositório **certo** — hoje `release/app-update.yml` aponta para
+      `babel-break`; `.deb` com `libgtk-3-0t64`.
+
+### Lote 2 — a v2 sobre base sólida
+
+- [ ] **Voz**: TTS + ASR + score de pronúncia, sobre **jobs nomeados com eventos de progresso e
+      cancelamento** (E9); skills `listening`/`speaking` deixando de ser linhas mortas — hoje
+      `blendSkill` só roda para `grammar`/`vocab` (`learning.ts:1100-1101`) e
+      `speaking`/`writing` (`scenario.ts:428-429`); escala de score única (D7); CSP/`connect-src`
+      e permissão de microfone no empacotamento.
+- [ ] **Múltiplos perfis**: canais `profile:create/switch/delete` (não existe nenhum entre os 57);
+      **todo handler escopado por `profileId`** (Lote 0 D2); `activeProfile` explícito, nunca
+      singleton de módulo.
+- [ ] **Export/import**: sobre `schemaVersion` (D1) e FK (C5) — dump sem versão não é compatível,
+      e linhas órfãs exportam perfil corrompido.
+- [ ] **Pendências de v1 assumidas no plano**: lembretes opt-in (§11 e §14 — `grep reminder src/` é 0),
+      modelo por papel (§3, notas de implementação: só `geminiModel`/`ollamaModel` hoje),
+      auto-update com repositório correto (F5), Win/mac validados, `libgtk-3-0t64`, i18n
+      compartilhado entre main e `runtime-text` (D8).
+- [ ] **D10** reestimativa com peso por confiança, mínimo de amostras e banda morta nos bins do
+      CEFR (`adapt.ts:111-143` — hoje A2↔B1 fica alternando; `C2` não existe em lugar nenhum);
+      **D11** `request_retention` no FSRS e fim das suposições de enum do ts-fsrs (`srs.ts:42,186`).
+
+### Critérios de aceite do M6 (para a v2 começar)
+
+1. Revisar uma fila de 5 cards responde os **5** cards, com teste cobrindo a interação pai ↔
+   `ReviewQueue`.
+2. Fechar a conversa A não toca em `study_sessions` de B; um fechamento gera **um** recap.
+3. Nenhum request de IA pode durar mais que o seu deadline; derrubar o Ollama no meio de uma
+   geração não deixa `inFlight > 0` — a fila ociosa volta a andar sem reiniciar.
+4. `npm run eval` roda em CI com exit code, e uma frase correta pontua como "sem correções", não
+   como falha.
+5. Conteúdo em cache gravado com `promptVersion` anterior é tratado como `stale`.
+6. Corromper o `.db` de propósito produz tela de recuperação com backup, não app sem janela.
+7. `npm run lint` + `npm test` + CI verdes; `LICENSE` e `CHANGELOG.md` existem.
+8. Um handler IPC chamado com payload inválido **recusa** em vez de persistir.
+
+## 13. Fora de escopo na v1
 
 Voz/pronúncia, contas/sync, mobile, imagens, multiplayer, monetização, RAG sobre documentos,
 gamificação punitiva (streak, ranking, metas expiradas).
 
-## 13. Ajustes padrão (a menos que o usuário mude)
+## 14. Ajustes padrão (a menos que o usuário mude)
 
 - `focus_mix = 0.3` (30% do conteúdo **recomendado** vem do tópico pedido).
 - **Nenhuma meta diária, streak ou sessão obrigatória.** Sessão guiada só quando o usuário pede.
