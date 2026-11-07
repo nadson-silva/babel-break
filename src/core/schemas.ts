@@ -54,6 +54,21 @@ export const lessonContentSchema = z.object({
     )
     .min(1)
     .max(4),
+  /**
+   * Armadilhas específicas de falantes de PT-BR ligadas aos erros do aluno.
+   * É o que torna visível o fato de a lição #2 ser diferente da #1.
+   */
+  pitfalls: z
+    .array(
+      z.object({
+        tag: z.string().min(2),
+        wrong: z.string().min(1),
+        right: z.string().min(1),
+        note: z.string().min(1)
+      })
+    )
+    .max(4)
+    .default([]),
   vocabulary: z
     .array(
       z.object({
@@ -82,7 +97,9 @@ export const generatedExerciseSchema = z.object({
   tokens: z.array(z.string().min(1)).default([]),
   answer: z.string().min(1),
   alternatives: z.array(z.string().min(1)).default([]),
-  explanation: z.string().default('')
+  explanation: z.string().default(''),
+  /** Tags de erro que este exercício treina (vêm do caderno de erros). */
+  targetTags: z.array(z.string()).default([])
 })
 
 export const exerciseSetSchema = z.object({
@@ -97,9 +114,31 @@ export const gradeSchema = z.object({
   errorTags: z.array(z.string()).default([])
 })
 
+/** Correção de texto livre do aluno (usada no chat com o tutor). */
+export const correctionItemSchema = z.object({
+  original: z.string().min(1),
+  corrected: z.string().min(1),
+  tag: z.string().min(1),
+  note: z.string().default('')
+})
+
+export const correctionSetSchema = z.object({
+  hasErrors: z.boolean().default(false),
+  corrections: z.array(correctionItemSchema).max(6).default([]),
+  /** Versão natural da mesma ideia — o recast que aparece embaixo da mensagem. */
+  recast: z.string().default('')
+})
+
+/** Resumo rolante de uma conversa longa, injetado no lugar das mensagens antigas. */
+export const conversationSummarySchema = z.object({
+  summary: z.string().min(10)
+})
+
 export type PlacementOutput = z.infer<typeof placementSchema>
 export type CurriculumOutput = z.infer<typeof curriculumSchema>
 export type LessonContentOutput = z.infer<typeof lessonContentSchema>
 export type GeneratedExercise = z.infer<typeof generatedExerciseSchema>
 export type ExerciseSetOutput = z.infer<typeof exerciseSetSchema>
 export type GradeOutput = z.infer<typeof gradeSchema>
+export type CorrectionSetOutput = z.infer<typeof correctionSetSchema>
+export type ConversationSummaryOutput = z.infer<typeof conversationSummarySchema>

@@ -2,21 +2,29 @@ import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
   ChatEvent,
-  ChatSendRequest,
+  ConversationSummary,
+  ConversationView,
   CurriculumView,
   GradeFeedback,
+  GuidedSession,
+  GuidedStep,
   HomeState,
   LessonDetail,
   LessonResultView,
   ModelInfo,
+  NotebookView,
   OnboardingInput,
   PlacementResult,
   PlacementTest,
   ProfileState,
   ProviderId,
+  RecapView,
+  ReviewRating,
+  ReviewResult,
+  ReviewState,
   SettingsPayload,
-  StoredMessage,
-  TestResult
+  TestResult,
+  TutorSendRequest
 } from '../shared/types'
 
 const api = {
@@ -34,16 +42,46 @@ const api = {
   provider: {
     test: (provider: ProviderId): Promise<TestResult> => ipcRenderer.invoke('provider:test', provider)
   },
-  chat: {
-    history: (): Promise<StoredMessage[]> => ipcRenderer.invoke('chat:history'),
-    send: (request: ChatSendRequest): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('chat:send', request),
-    cancel: (requestId: string): Promise<void> => ipcRenderer.invoke('chat:cancel', requestId),
+  /** Eventos do turno do tutor (streaming + correções inline). */
+  tutor: {
     onEvent: (callback: (event: ChatEvent) => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, payload: ChatEvent): void => callback(payload)
       ipcRenderer.on('chat:event', listener)
       return () => ipcRenderer.removeListener('chat:event', listener)
-    }
+    },
+    list: (): Promise<ConversationSummary[]> => ipcRenderer.invoke('tutor:list'),
+    latest: (): Promise<ConversationSummary | null> => ipcRenderer.invoke('tutor:latest'),
+    open: (conversationId: number): Promise<ConversationView> =>
+      ipcRenderer.invoke('tutor:open', conversationId),
+    create: (input: { topic?: string | null; lessonId?: number | null } = {}): Promise<ConversationView> =>
+      ipcRenderer.invoke('tutor:new', input),
+    send: (request: TutorSendRequest): Promise<void> => ipcRenderer.invoke('tutor:send', request),
+    cancel: (requestId: string): Promise<void> => ipcRenderer.invoke('tutor:cancel', requestId),
+    close: (conversationId: number): Promise<RecapView> => ipcRenderer.invoke('tutor:close', conversationId)
+  },
+  review: {
+    state: (limit?: number): Promise<ReviewState> => ipcRenderer.invoke('review:state', limit),
+    answer: (input: { cardId: number; rating: ReviewRating }): Promise<ReviewResult> =>
+      ipcRenderer.invoke('review:answer', input),
+    fromErrors: (): Promise<number> => ipcRenderer.invoke('review:from-errors')
+  },
+  notebook: {
+    get: (): Promise<NotebookView> => ipcRenderer.invoke('notebook:get'),
+    resolve: (errorId: number, resolved: boolean): Promise<void> =>
+      ipcRenderer.invoke('notebook:resolve', errorId, resolved),
+    resolveTag: (tags: string[]): Promise<number> => ipcRenderer.invoke('notebook:resolve-tag', tags)
+  },
+  guided: {
+    active: (): Promise<GuidedSession | null> => ipcRenderer.invoke('guided:active'),
+    start: (): Promise<GuidedSession> => ipcRenderer.invoke('guided:start'),
+    step: (step: GuidedStep): Promise<GuidedSession> => ipcRenderer.invoke('guided:step', step),
+    reviewCount: (done: number): Promise<GuidedSession> => ipcRenderer.invoke('guided:review-count', done),
+    practice: (practice: { correct: number; total: number }): Promise<GuidedSession> =>
+      ipcRenderer.invoke('guided:practice', practice),
+    tutor: (): Promise<GuidedSession> => ipcRenderer.invoke('guided:tutor'),
+    finish: (input: { reviewDone?: number; practice?: { correct: number; total: number } }): Promise<GuidedSession> =>
+      ipcRenderer.invoke('guided:finish', input),
+    abandon: (): Promise<void> => ipcRenderer.invoke('guided:abandon')
   },
   learning: {
     profile: {

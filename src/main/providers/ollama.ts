@@ -6,6 +6,9 @@ interface OllamaTag {
   name: string
   size?: number
   details?: { parameter_size?: string }
+  /** Presente em modelos remotos (ex.: gemma4:31b-cloud) — nada baixado localmente. */
+  remote_model?: string
+  remote_host?: string
 }
 
 function baseUrl(): string {
@@ -22,7 +25,8 @@ function connectionHint(): string {
 }
 
 function formatSize(bytes?: number): string | undefined {
-  if (!bytes) return undefined
+  // Modelos remotos (cloud) trazem size minúsculo — não faz dizer "0.0 GB".
+  if (!bytes || bytes < 1024 * 1024) return undefined
   const gb = bytes / 1024 ** 3
   return `${gb.toFixed(1)} GB`
 }
@@ -53,9 +57,21 @@ export const ollamaProvider: Provider = {
       .map((model) => ({
         id: model.name,
         label: model.name,
-        description: [model.details?.parameter_size, formatSize(model.size)].filter(Boolean).join(' · ')
+        description: [
+          model.details?.parameter_size,
+          formatSize(model.size),
+          model.remote_model ? 'nuvem' : null
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        remote: Boolean(model.remote_model)
       }))
-      .sort((a, b) => a.id.localeCompare(b.id))
+      .sort((a, b) => {
+        // locais primeiro: o padrão auto-selecionado precisa funcionar offline
+        if (a.remote !== b.remote) return a.remote ? 1 : -1
+        return a.id.localeCompare(b.id)
+      })
+      .map(({ remote, ...info }) => info)
   },
 
   async test(model: string): Promise<TestResult> {

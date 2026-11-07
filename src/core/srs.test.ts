@@ -1,0 +1,108 @@
+import { describe, expect, it } from 'vitest'
+import {
+  applyRating,
+  cardDedupeKey,
+  freshSchedule,
+  dueLabel,
+  errorCard,
+  fullSchedule,
+  parseSchedule,
+  previewIntervals,
+  vocabCard
+} from './srs'
+
+describe('templates de card', () => {
+  it('gera cloze a partir da frase de exemplo do vocabulário', () => {
+    const card = vocabCard({ term: 'deploy', translation: 'implantar', example: 'We deploy on Fridays.' }, 7)
+    expect(card.kind).toBe('vocab')
+    expect(card.front).toContain('___')
+    expect(card.back).toContain('deploy')
+    expect(card.back).toContain('implantar')
+    expect(card.lessonId).toBe(7)
+  })
+
+  it('cai para frente/traseiro quando o termo não está na frase', () => {
+    const card = vocabCard({ term: 'ship', translation: 'enviar', example: 'Release today.' })
+    expect(card.front).toBe('ship — enviar')
+  })
+
+  it('cria card de erro com a correção e a tag', () => {
+    const card = errorCard({
+      original: 'I have 25 years.',
+      corrected: 'I am 25 years old.',
+      tag: 'have-vs-be',
+      note: 'Idade usa to be.'
+    })
+    expect(card.kind).toBe('error')
+    expect(card.front).toContain('I have 25 years.')
+    expect(card.back).toContain('I am 25 years old.')
+    expect(card.tag).toBe('have-vs-be')
+  })
+
+  it('deduplica por conteúdo, não por linha inserida', () => {
+    const a = vocabCard({ term: 'study', translation: 'estudar', example: 'I study English.' }, 1)
+    const b = vocabCard({ term: 'Study', translation: 'estudar', example: 'I study English.' }, 2)
+    expect(cardDedupeKey(a)).toBe(cardDedupeKey(b))
+  })
+})
+
+describe('agendamento FSRS', () => {
+  it('novo card vira learning ao responder "bom" e ganha due futuro', () => {
+    const now = new Date('2026-11-07T10:00:00Z')
+    const start = fullSchedule(freshSchedule(now))
+    expect(start.state).toBe('new')
+
+    const outcome = applyRating(start.schedule, 'good', now)
+    expect(outcome.reps).toBe(1)
+    expect(['learning', 'review']).toContain(outcome.state)
+    expect(outcome.due).toBeGreaterThan(now.getTime())
+    expect(outcome.stability).toBeGreaterThan(0)
+  })
+
+  it('errado ("again") aumenta lapses quando o card já estava em revisão', () => {
+    const now = new Date('2026-11-07T10:00:00Z')
+    let schedule = fullSchedule(freshSchedule(now))
+
+    for (const rating of ['good', 'good', 'good'] as const) {
+      schedule = applyRating(schedule.schedule, rating, new Date(schedule.due + 60_000))
+    }
+
+    const failed = applyRating(schedule.schedule, 'again', new Date(schedule.due + 60_000))
+    if (schedule.state === 'review') {
+      expect(failed.lapses).toBe(schedule.lapses + 1)
+    }
+    expect(failed.difficulty).toBeGreaterThan(schedule.difficulty)
+  })
+
+  it('prévia dos quatro botões vem ordenada e legível', () => {
+    const now = new Date('2026-11-07T10:00:00Z')
+    const schedule = fullSchedule(freshSchedule(now))
+    const preview = previewIntervals(schedule.schedule, now)
+
+    expect(preview.map((item) => item.rating)).toEqual(['again', 'hard', 'good', 'easy'])
+    for (const item of preview) expect(item.label).toMatch(/\d/)
+    expect(preview[3].minutes).toBeGreaterThanOrEqual(preview[0].minutes)
+  })
+
+  it('sobrevive a um schedule antigo/corrompido sem perder o card', () => {
+    const now = new Date('2026-11-07T10:00:00Z')
+    expect(parseSchedule('não é json', now).state).toBeDefined()
+    expect(parseSchedule(null, now).reps).toBe(0)
+
+    const card = freshSchedule(now)
+    const round = parseSchedule(serializeRoundTrip(card), now)
+    expect(round.due.getTime()).toBe(card.due.getTime())
+  })
+
+  it('descreve vencimento em linguagem humana', () => {
+    const now = Date.now()
+    expect(dueLabel(now - 1000, now)).toBe('agora')
+    expect(dueLabel(now + 10 * 60_000, now)).toBe('em 10 min')
+    expect(dueLabel(now + 3 * 60 * 60_000, now)).toBe('em 3 h')
+    expect(dueLabel(now + 5 * 24 * 60 * 60_000, now)).toBe('em 5 d')
+  })
+})
+
+function serializeRoundTrip(card: { due: Date }): string {
+  return JSON.stringify({ ...card, due: card.due.toISOString(), last_review: null })
+}

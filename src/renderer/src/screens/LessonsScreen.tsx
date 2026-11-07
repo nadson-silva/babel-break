@@ -113,7 +113,7 @@ export function LessonsScreen({ settings, onOpenLesson, onOpenSettings }: Lesson
                 onClick={onOpenSettings}
                 className="shrink-0 rounded-lg border border-warn/40 px-3 py-1.5 font-medium transition-colors hover:bg-warn/10"
               >
-                {t.chat.openSettings}
+                {t.common.openSettings}
               </button>
             </div>
           )}

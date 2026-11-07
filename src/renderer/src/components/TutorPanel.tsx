@@ -1,0 +1,323 @@
+import { useEffect, useRef, useState } from 'react'
+import type { JSX, KeyboardEvent } from 'react'
+import type { ChatEvent, ConversationView, Correction, RecapView } from '../../../shared/types'
+import { t } from '../i18n/pt-BR'
+import { CorrectionList } from './CorrectionList'
+
+interface TutorPanelProps {
+  conversationId: number
+  onClosed?: (recap: RecapView) => void
+  /** Altura cheia (tela do tutor) ou compacta (dentro da sessão guiada). */
+  variant?: 'full' | 'compact'
+}
+
+interface UiMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  pending?: boolean
+  error?: boolean
+  cancelled?: boolean
+  corrections?: Correction[]
+  recast?: string
+}
+
+function newId(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+function fromView(view: ConversationView): UiMessage[] {
+  return view.messages.map((message) => ({
+    id: `stored-${message.id}`,
+    role: message.role,
+    content: message.content,
+    corrections: message.corrections.length > 0 ? message.corrections : undefined
+  }))
+}
+
+export function TutorPanel({ conversationId, onClosed, variant = 'full' }: TutorPanelProps): JSX.Element {
+  const [messages, setMessages] = useState<UiMessage[]>([])
+  const [input, setInput] = useState('')
+  const [streaming, setStreaming] = useState<string | null>(null)
+  const [status, setStatus] = useState<string | null>(null)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [recap, setRecap] = useState<RecapView | null>(null)
+  const [closing, setClosing] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  const busy = streaming !== null
+
+  useEffect(() => {
+    let alive = true
+    setLoadError(null)
+    setRecap(null)
+    setMessages([])
+
+    window.api.tutor
+      .open(conversationId)
+      .then((view) => {
+        if (alive) setMessages(fromView(view))
+      })
+      .catch((error: unknown) => {
+        if (alive) setLoadError(error instanceof Error ? error.message : String(error))
+      })
+
+    return () => {
+      alive = false
+    }
+  }, [conversationId])
+
+  useEffect(() => {
+    return window.api.tutor.onEvent((event: ChatEvent) => {
+      if (event.type === 'status') {
+        setStatus(event.message ?? null)
+        return
+      }
+
+      if (event.type === 'corrections') {
+        // anexa as correções à última mensagem do aluno antes da resposta
+        setMessages((previous) => {
+          const lastUser = [...previous].reverse().findIndex((message) => message.role === 'user')
+          if (lastUser === -1) return previous
+          const index = previous.length - 1 - lastUser
+          return previous.map((message, position) =>
+            position === index
+              ? { ...message, corrections: event.corrections ?? [], recast: event.recast }
+              : message
+          )
+        })
+        return
+      }
+
+      setMessages((previous) =>
+        previous.map((message) => {
+          if (message.id !== event.requestId) return message
+
+          if (event.type === 'token') {
+            return { ...message, content: message.content + (event.token ?? '') }
+          }
+          if (event.type === 'done') {
+            return { ...message, content: event.text || message.content, pending: false }
+          }
+          if (event.type === 'error') {
+            return {
+              ...message,
+              content: event.message ?? 'Erro inesperado ao falar com o provedor.',
+              pending: false,
+              error: true
+            }
+          }
+          return { ...message, pending: false, cancelled: true }
+        })
+      )
+
+      if (event.type !== 'token') {
+        setStatus(null)
+        setStreaming((current) => (current === event.requestId ? null : current))
+      }
+    })
+  }, [])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'end' })
+  }, [messages])
+
+  async function send(rawText: string): Promise<void> {
+    const text = rawText.trim()
+    if (!text || busy) return
+
+    const requestId = newId()
+    setLoadError(null)
+    setInput('')
+    setMessages((previous) => [
+      ...previous,
+      { id: newId(), role: 'user', content: text },
+      { id: requestId, role: 'assistant', content: '', pending: true }
+    ])
+    setStreaming(requestId)
+
+    try {
+      await window.api.tutor.send({ requestId, conversationId, text })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setMessages((previous) =>
+        previous.map((entry) =>
+          entry.id === requestId && entry.pending
+            ? { ...entry, content: message, pending: false, error: true }
+            : entry
+        )
+      )
+    } finally {
+      setStreaming((current) => (current === requestId ? null : current))
+      setStatus(null)
+    }
+  }
+
+  function stop(): void {
+    if (!streaming) return
+    const requestId = streaming
+    void window.api.tutor.cancel(requestId)
+    setStreaming(null)
+    setMessages((previous) =>
+      previous.map((message) =>
+        message.id === requestId && message.pending
+          ? { ...message, pending: false, cancelled: true }
+          : message
+      )
+    )
+  }
+
+  async function close(): Promise<void> {
+    setClosing(true)
+    try {
+      const result = await window.api.tutor.close(conversationId)
+      setRecap(result)
+      onClosed?.(result)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setClosing(false)
+    }
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      void send(input)
+    }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {loadError && (
+        <div className="border-b border-danger/30 bg-danger-soft px-6 py-2.5 text-xs text-danger">
+          {loadError}
+        </div>
+      )}
+
+      <div className={`flex-1 overflow-y-auto px-6 ${variant === 'full' ? 'py-6' : 'py-4'}`}>
+        {messages.length === 0 ? (
+          <div className="mx-auto flex h-full max-w-xl flex-col items-center justify-center text-center">
+            <h2 className="text-base font-semibold">{t.tutor.emptyTitle}</h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted">{t.tutor.emptyBody}</p>
+            <div className="mt-5 flex w-full flex-col gap-2">
+              {t.tutor.suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => void send(suggestion)}
+                  className="rounded-xl border border-line bg-panel px-4 py-3 text-left text-sm text-muted transition-colors hover:border-accent/40 hover:bg-panel-2 hover:text-ink"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="mx-auto flex max-w-3xl flex-col gap-4">
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`w-full max-w-[85%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                    message.role === 'user'
+                      ? 'rounded-br-md bg-accent text-accent-ink'
+                      : message.error
+                        ? 'rounded-bl-md border border-danger/40 bg-danger-soft text-danger'
+                        : 'rounded-bl-md border border-line bg-panel text-ink'
+                  }`}
+                >
+                  <div
+                    className={`mb-1 text-[10px] uppercase tracking-wider ${
+                      message.role === 'user' ? 'text-accent-ink/60' : 'text-faint'
+                    }`}
+                  >
+                    {message.role === 'user' ? t.tutor.you : t.tutor.tutor}
+                  </div>
+                  {message.content || (message.pending ? (status ? t.tutor[statusKey(status)] : t.tutor.thinking) : '')}
+                  {message.pending && (
+                    <span className="ml-1 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-accent align-middle" />
+                  )}
+                  {message.cancelled && (
+                    <div className="mt-1 text-[10px] uppercase tracking-wider text-faint">{t.tutor.interrupted}</div>
+                  )}
+
+                  {message.role === 'user' && message.corrections && (
+                    <div className="mt-2 rounded-xl bg-accent-ink/10 px-3 py-2">
+                      <CorrectionList corrections={message.corrections} recast={message.recast} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div ref={bottomRef} />
+          </div>
+        )}
+      </div>
+
+      {recap && (
+        <div className="border-t border-line bg-panel px-6 py-4">
+          <div className="mx-auto max-w-3xl">
+            <div className="text-[10px] uppercase tracking-wider text-faint">{t.tutor.recapTitle}</div>
+            <p className="mt-1 text-sm leading-relaxed text-ink">{recap.message}</p>
+            {recap.corrections.length > 0 && (
+              <div className="mt-3">
+                <CorrectionList corrections={recap.corrections} variant="block" />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div className="border-t border-line bg-panel/60 px-6 py-4">
+        <div className="mx-auto flex max-w-3xl items-end gap-3">
+          <textarea
+            value={input}
+            onChange={(event) => setInput(event.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={variant === 'compact' ? 2 : 3}
+            placeholder={t.tutor.placeholder}
+            className="max-h-40 min-h-[52px] flex-1 resize-none rounded-xl border border-line bg-panel px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-faint focus:border-accent/50"
+          />
+          <div className="flex shrink-0 flex-col gap-2">
+            {busy ? (
+              <button
+                type="button"
+                onClick={stop}
+                className="h-[25px] rounded-lg border border-line px-4 text-xs font-medium text-muted transition-colors hover:border-danger/40 hover:text-danger"
+              >
+                {t.tutor.stop}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => void send(input)}
+                disabled={!input.trim()}
+                className="h-[25px] rounded-lg bg-accent px-4 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t.tutor.send}
+              </button>
+            )}
+            {!recap && (
+              <button
+                type="button"
+                onClick={() => void close()}
+                disabled={closing || messages.length === 0}
+                className="h-[25px] rounded-lg border border-line px-4 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
+              >
+                {closing ? t.common.saving : t.tutor.endConversation}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function statusKey(status: string): 'correcting' | 'responding' {
+  return status === 'corrigindo' ? 'correcting' : 'responding'
+}

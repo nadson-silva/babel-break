@@ -2,12 +2,13 @@ import type { JSX } from 'react'
 import type { SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
 
-export type View = 'home' | 'lessons' | 'chat' | 'settings'
+export type View = 'home' | 'lessons' | 'tutor' | 'review' | 'notebook' | 'settings'
 
 interface SidebarProps {
   view: View
   onNavigate: (view: View) => void
   settings: SettingsPayload
+  dueCount?: number
 }
 
 function HomeIcon(): JSX.Element {
@@ -73,12 +74,14 @@ function NavButton({
   active,
   onClick,
   icon,
-  label
+  label,
+  badge
 }: {
   active: boolean
   onClick: () => void
   icon: JSX.Element
   label: string
+  badge?: number
 }): JSX.Element {
   return (
     <button
@@ -89,12 +92,45 @@ function NavButton({
       }`}
     >
       <span className={active ? 'text-accent' : 'text-faint'}>{icon}</span>
-      {label}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {badge ? (
+        <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+          {badge}
+        </span>
+      ) : null}
     </button>
   )
 }
 
-export function Sidebar({ view, onNavigate, settings }: SidebarProps): JSX.Element {
+function NotebookIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path
+        d="M6 4h11a2 2 0 0 1 2 2v14H8a2 2 0 0 1-2-2V4Z"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path d="M9 8.5h6M9 12h6M9 15.5h3" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function ReviewIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path
+        d="M20 11a8 8 0 1 1-3-6.2M20 4v4h-4"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
+export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarProps): JSX.Element {
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
   const providerLabel = settings.provider === 'gemini' ? t.provider.gemini : t.provider.ollama
   const secure =
@@ -128,10 +164,23 @@ export function Sidebar({ view, onNavigate, settings }: SidebarProps): JSX.Eleme
           label={t.nav.lessons}
         />
         <NavButton
-          active={view === 'chat'}
-          onClick={() => onNavigate('chat')}
+          active={view === 'tutor'}
+          onClick={() => onNavigate('tutor')}
           icon={<ChatIcon />}
-          label={t.nav.chat}
+          label={t.nav.tutor}
+        />
+        <NavButton
+          active={view === 'review'}
+          onClick={() => onNavigate('review')}
+          icon={<ReviewIcon />}
+          label={t.nav.review}
+          badge={dueCount}
+        />
+        <NavButton
+          active={view === 'notebook'}
+          onClick={() => onNavigate('notebook')}
+          icon={<NotebookIcon />}
+          label={t.nav.notebook}
         />
         <NavButton
           active={view === 'settings'}

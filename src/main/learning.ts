@@ -1,12 +1,12 @@
 import { ipcMain } from 'electron'
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import type {
   CefrLevel,
+  Correction,
   CurriculumView,
   ExerciseType,
   ExerciseView,
   GradeFeedback,
-  HomeState,
   LessonContentView,
   LessonDetail,
   LessonResultView,
@@ -20,8 +20,9 @@ import type {
   SkillId,
   UnitView
 } from '../shared/types'
+import type { ErrorFocusEntry } from '../core/adapt'
 import { clampLevel, levelIndex, levelFromScore, CEFR_LEVELS } from '../core/cefr'
-import { fallbackCurriculum, fallbackExercises, fallbackLessonContent } from '../core/fallback'
+import { fallbackCurriculum, fallbackExercises, fallbackLessonContent, pitfallsFrom } from '../core/fallback'
 import {
   gradeDeterministic,
   normalizeText,
@@ -43,10 +44,14 @@ import {
   lessonContentSchema,
   placementSchema,
   type CurriculumOutput,
-  type ExerciseSetOutput
+  type ExerciseSetOutput,
+  type LessonContentOutput
 } from '../core/schemas'
 import { generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
+import { errorHints, focusFor, recordCorrections } from './notebook'
+import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors } from './review'
+import { applyReestimation } from './tutor'
 import { getSettings } from './settings'
 
 type ProfileRow = typeof schema.profiles.$inferSelect
@@ -78,6 +83,7 @@ interface ExercisePayload {
   prompt: string
   options: string[]
   tokens: string[]
+  targetTags?: string[]
 }
 
 function parseJson<T>(value: string | null | undefined): T | null {
@@ -97,7 +103,7 @@ function toCefr(value: string | null | undefined): CefrLevel {
   return clampLevel(value)
 }
 
-function profileView(profile: ProfileRow): ProfileView {
+export function profileView(profile: ProfileRow): ProfileView {
   return {
     id: profile.id,
     targetLang: profile.targetLang,
@@ -183,48 +189,32 @@ function blendSkill(profileId: number, skill: SkillId, sample: number): void {
 }
 
 function recentErrorHints(profileId: number, limit = 5): ErrorHint[] {
-  return getDb()
-    .select()
-    .from(schema.errors)
-    .where(and(eq(schema.errors.profileId, profileId), isNull(schema.errors.resolvedAt)))
-    .orderBy(desc(schema.errors.createdAt))
-    .limit(limit)
-    .all()
-    .map((row) => ({ tag: row.tag, original: row.original, corrected: row.corrected }))
+  return errorHints(profileId, limit)
 }
 
-function recordError(profileId: number, exercise: ExerciseRow, response: string, feedback: GradeFeedback): void {
-  const db = getDb()
-  const corrected = feedback.corrected?.trim() || feedback.feedback
+/** Erro de exercício vira linha do caderno, com recorrência e nota. */
+function recordExerciseError(
+  profileId: number,
+  exercise: ExerciseRow,
+  response: string,
+  feedback: GradeFeedback,
+  source: Correction['source']
+): void {
+  const corrected = (feedback.corrected ?? '').trim() || feedback.feedback
+  if (!corrected) return
 
-  for (const tag of feedback.errorTags.slice(0, 3)) {
-    const duplicate = db
-      .select({ id: schema.errors.id })
-      .from(schema.errors)
-      .where(
-        and(
-          eq(schema.errors.profileId, profileId),
-          eq(schema.errors.tag, tag),
-          eq(schema.errors.original, response),
-          isNull(schema.errors.resolvedAt)
-        )
-      )
-      .get()
+  const corrections: Correction[] = feedback.errorTags.slice(0, 3).map((tag) => ({
+    original: response,
+    corrected,
+    tag,
+    note: feedback.feedback,
+    source
+  }))
 
-    if (duplicate) continue
-
-    db.insert(schema.errors)
-      .values({
-        profileId,
-        category: 'exercise',
-        tag,
-        original: response,
-        corrected,
-        context: parseJson<ExercisePayload>(exercise.payload)?.prompt ?? null,
-        createdAt: Date.now()
-      })
-      .run()
-  }
+  recordCorrections(profileId, corrections, {
+    category: 'exercise',
+    context: exercisePayload(exercise).prompt ?? null
+  })
 }
 
 function summaryOf(lesson: LessonRow, unitTitle: string | null, progress: ProgressRow | undefined): LessonSummary {
@@ -404,13 +394,19 @@ function toExerciseView(row: ExerciseRow): ExerciseView {
     prompt: payload.prompt,
     options: payload.options ?? [],
     tokens: payload.tokens ?? [],
-    source: row.source === 'ai' || row.source === 'fallback' ? row.source : null
+    source: row.source === 'ai' || row.source === 'fallback' ? row.source : null,
+    targetTags: payload.targetTags ?? parseJson<{ targetTags?: string[] }>(row.answerKey)?.targetTags ?? []
   }
 }
 
-async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, unitTitle: string): Promise<void> {
+async function ensureLessonGenerated(
+  lesson: LessonRow,
+  profile: ProfileRow,
+  unitTitle: string
+): Promise<ErrorFocusEntry[]> {
   const db = getDb()
   const level = toCefr(lesson.level)
+  const focus = focusFor(profile.id, 5)
 
   let content = parseJson<LessonContentView>(lesson.content)
 
@@ -425,7 +421,7 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
       errors: hints
     })
 
-    let generated: LessonContentView
+    let generated: LessonContentOutput
     let source: 'ai' | 'fallback'
 
     try {
@@ -443,12 +439,17 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
       generated = fallbackLessonContent({
         title: lesson.title,
         objective: lesson.objective ?? lesson.title,
-        level
+        level,
+        errors: focus
       })
       source = 'fallback'
     }
 
-    const resolved: LessonContentView = { ...generated, source }
+    const resolved: LessonContentView = {
+      ...generated,
+      pitfalls: generated.pitfalls ?? pitfallsFrom(focus),
+      source
+    }
     content = resolved
 
     db.transaction((tx) => {
@@ -474,17 +475,28 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
 
   if (!content) throw new Error('Não foi possível preparar o conteúdo da lição.')
 
+  const exerciseLevel: LessonContentOutput = {
+    title: content.title,
+    level: content.level,
+    objective: content.objective,
+    explanation: content.explanation,
+    examples: content.examples,
+    grammarPoints: content.grammarPoints,
+    pitfalls: content.pitfalls ?? pitfallsFrom(focus),
+    vocabulary: content.vocabulary
+  }
+
   const existingExercises = db
     .select({ id: schema.exercises.id })
     .from(schema.exercises)
     .where(eq(schema.exercises.lessonId, lesson.id))
     .all()
 
-  if (existingExercises.length > 0) return
+  if (existingExercises.length > 0) return focus
 
   const hints = recentErrorHints(profile.id)
   const prompt = exercisePrompt({
-    content,
+    content: exerciseLevel,
     level: content.level,
     goal: profile.goal ?? '',
     errors: hints
@@ -505,7 +517,7 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
       '[learning] geração de exercícios falhou, usando exercícios determinísticos:',
       error instanceof Error ? error.message : error
     )
-    generated = fallbackExercises(content)
+    generated = fallbackExercises(exerciseLevel, focus)
     source = 'fallback'
   }
 
@@ -531,7 +543,8 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
       instruction: exercise.instruction,
       prompt: exercise.prompt,
       options,
-      tokens
+      tokens,
+      targetTags: exercise.targetTags ?? []
     }
 
     const answerKey: ExerciseAnswerKey = {
@@ -557,6 +570,8 @@ async function ensureLessonGenerated(lesson: LessonRow, profile: ProfileRow, uni
       tx.insert(schema.exercises).values(row).run()
     }
   })
+
+  return focus
 }
 
 function parseAnswerKey(row: ExerciseRow): ExerciseAnswerKey {
@@ -576,7 +591,7 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  await ensureLessonGenerated(owned.lesson, profile, owned.unit.title)
+  const focus = await ensureLessonGenerated(owned.lesson, profile, owned.unit.title)
 
   const fresh = getOwnedLesson(lessonId, profile.id)
   if (!fresh) throw new Error('Lição não encontrada.')
@@ -633,8 +648,9 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
 
   return {
     lesson: summaryOf(fresh.lesson, fresh.unit.title, progressOf(profile.id, lessonId)),
-    content,
+    content: { ...content, pitfalls: content.pitfalls ?? pitfallsFrom(focus) },
     exercises: exerciseRows.map(toExerciseView),
+    focus,
     sessionId: session.id
   }
 }
@@ -669,8 +685,10 @@ export async function answerExercise(input: {
   if (!response) throw new Error('Escreva ou monte uma resposta antes de verificar.')
 
   let feedback = gradeDeterministic(type, answerKey, response)
+  let gradedBy: Correction['source'] = 'local'
 
   if (!feedback) {
+    gradedBy = 'ai'
     const prompt = gradePrompt({
       type,
       prompt: payload.prompt,
@@ -720,7 +738,7 @@ export async function answerExercise(input: {
     .run()
 
   if (!feedback.correct) {
-    recordError(profile.id, exercise, response, feedback)
+    recordExerciseError(profile.id, exercise, response, feedback, gradedBy)
   }
 
   return feedback
@@ -779,22 +797,39 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
       .run()
   }
 
+  blendSkill(profile.id, 'grammar', score * 5)
+  blendSkill(profile.id, 'vocab', score * 5)
+
+  // Fechamento da lição: vocabulário vira card SRS + erros recorrentes também.
+  const lessonRow = db
+    .select({ content: schema.lessons.content })
+    .from(schema.lessons)
+    .where(eq(schema.lessons.id, input.lessonId))
+    .get()
+
+  const vocabulary = parseJson<LessonContentView>(lessonRow?.content)?.vocabulary ?? []
+  const examples = parseJson<LessonContentView>(lessonRow?.content)?.examples ?? []
+
+  let cardsCreated = cardsForLesson(profile.id, input.lessonId, vocabulary)
+  // Frases modelas da lição viram card de produção (traduzir → falar).
+  cardsCreated += cardsForPhrases(profile.id, examples, input.lessonId)
+  cardsCreated += cardsForRecurringErrors(profile.id, 3)
+
+  const levelChange = applyReestimation(profile.id)
+
   db.update(schema.studySessions)
     .set({
       endedAt: Date.now(),
-      summary: JSON.stringify({ lessonId: input.lessonId, correct, total, score })
+      summary: JSON.stringify({ lessonId: input.lessonId, correct, total, score, cardsCreated })
     })
     .where(eq(schema.studySessions.id, input.sessionId))
     .run()
 
-  blendSkill(profile.id, 'grammar', score * 5)
-  blendSkill(profile.id, 'vocab', score * 5)
-
-  return { lessonId: input.lessonId, score, correct, total }
+  return { lessonId: input.lessonId, score, correct, total, cardsCreated, levelChange }
 }
 
-export function homeState(): HomeState {
-  const profile = getDefaultProfile()
+/** Lição em andamento mais recente — base do "continuar de onde parei". */
+export function lastOpenedLesson(profileId: number): LessonSummary | null {
   const curriculum = curriculumView()
   const lessons = curriculum.units.flatMap((unit) => unit.lessons)
 
@@ -803,7 +838,7 @@ export function homeState(): HomeState {
     .from(schema.lessonProgress)
     .where(
       and(
-        eq(schema.lessonProgress.profileId, profile.id),
+        eq(schema.lessonProgress.profileId, profileId),
         eq(schema.lessonProgress.status, 'in_progress')
       )
     )
@@ -811,21 +846,8 @@ export function homeState(): HomeState {
     .limit(1)
     .get()
 
-  const continueLesson = recent
-    ? lessons.find((lesson) => lesson.id === recent.lessonId) ?? null
-    : null
-  const nextLesson = lessons.find((lesson) => lesson.status === 'not_started') ?? null
-  const completedCount = lessons.filter((lesson) => lesson.status === 'completed').length
-
-  return {
-    profile: profileView(profile),
-    curriculumReady: curriculum.generated,
-    continueLesson,
-    nextLesson,
-    units: curriculum.units,
-    completedCount,
-    totalCount: lessons.length
-  }
+  if (!recent) return null
+  return lessons.find((lesson) => lesson.id === recent.lessonId) ?? null
 }
 
 export async function generatePlacement(goal?: string): Promise<PlacementTest> {
@@ -965,6 +987,4 @@ export function registerLearningIpc(): void {
   ipcMain.handle('lesson:finish', (_event, input: { lessonId: number; sessionId: number }) =>
     finishLesson(input)
   )
-
-  ipcMain.handle('home:get', () => homeState())
 }

@@ -220,14 +220,21 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 
 ## 10. Milestones
 
-| Milestone | Entrega | Pronto quando |
-|---|---|---|
-| **M0 — shell** (1–2 d) | scaffold electron-vite, SQLite + migrações, configurações com provedor + chave + teste de conectividade, chat de teste em streaming | dá para conversar com Gemini **e** Ollama pelo app |
-| **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim |
-| **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência |
-| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica |
-| **M4 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo |
-| **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — |
+| Milestone | Entrega | Pronto quando | Estado |
+|---|---|---|---|
+| **M0 — shell** (1–2 d) | scaffold electron-vite, SQLite + migrações, configurações com provedor + chave + teste de conectividade, chat de teste em streaming | dá para conversar com Gemini **e** Ollama pelo app | ✅ concluído |
+| **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim | ✅ concluído |
+| **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência | ✅ concluído |
+| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ⏭ próximo |
+| **M4 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | — |
+| **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
+
+Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
+determinística offline), `core/srs.ts` + `ts-fsrs` (cards por template e agendamento FSRS),
+`core/adapt.ts` (o caderno vira foco de prompt e reestimativa de nível), `main/tutor.ts`
+(correções inline + janela rolante com resumo), `main/guided.ts` (sessão guiada de 5 etapas),
+telas Tutor/Revisão/Caderno/Sessão guiada, suíte de testes em `src/**/*.test.ts` e o harness
+`scripts/eval.mjs`.
 
 A base vem antes das trilhas de propósito: trilhas reutilizam a mesma máquina de lição/exercício/SRS;
 construí-las primeiro significaria construir tudo duas vezes.

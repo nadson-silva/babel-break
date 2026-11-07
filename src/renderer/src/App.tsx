@@ -1,14 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import type { ProfileState, SettingsPayload } from '../../shared/types'
+import type { GuidedSession, ProfileState, SettingsPayload } from '../../shared/types'
 import { Sidebar, type View } from './components/Sidebar'
 import { t } from './i18n/pt-BR'
-import { ChatScreen } from './screens/ChatScreen'
+import { GuidedScreen } from './screens/GuidedScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { LessonScreen } from './screens/LessonScreen'
 import { LessonsScreen } from './screens/LessonsScreen'
+import { NotebookScreen } from './screens/NotebookScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
+import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { TutorScreen } from './screens/TutorScreen'
 
 function Splash({ error }: { error: string | null }): JSX.Element {
   return (
@@ -33,17 +36,22 @@ export default function App(): JSX.Element {
   const [settings, setSettings] = useState<SettingsPayload | null>(null)
   const [profileState, setProfileState] = useState<ProfileState | null>(null)
   const [activeLessonId, setActiveLessonId] = useState<number | null>(null)
+  const [guided, setGuided] = useState<GuidedSession | null>(null)
+  const [tutorConversation, setTutorConversation] = useState<number | null>(null)
+  const [dueCount, setDueCount] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
   const reload = useCallback(async (): Promise<void> => {
     try {
-      const [nextSettings, nextProfile] = await Promise.all([
+      const [nextSettings, nextProfile, review] = await Promise.all([
         window.api.settings.get(),
-        window.api.learning.profile.get()
+        window.api.learning.profile.get(),
+        window.api.review.state(1)
       ])
       setSettings(nextSettings)
       setProfileState(nextProfile)
+      setDueCount(review.dueCount)
       setError(null)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -73,7 +81,15 @@ export default function App(): JSX.Element {
 
   function navigate(next: View): void {
     setActiveLessonId(null)
+    setGuided(null)
     setView(next)
+  }
+
+  function refreshBadges(): void {
+    void window.api.review
+      .state(1)
+      .then((state) => setDueCount(state.dueCount))
+      .catch(() => undefined)
   }
 
   function openLesson(lessonId: number): void {
@@ -87,16 +103,43 @@ export default function App(): JSX.Element {
     void reload()
   }
 
+  function openTutor(conversationId?: number): void {
+    setActiveLessonId(null)
+    setGuided(null)
+    setTutorConversation(conversationId ?? null)
+    setView('tutor')
+  }
+
+  function startGuided(session: GuidedSession): void {
+    setActiveLessonId(null)
+    setGuided(session)
+  }
+
+  function closeGuided(): void {
+    setGuided(null)
+    setView('home')
+    setRefreshKey((value) => value + 1)
+    void reload()
+  }
+
   return (
     <div className="flex h-full">
-      <Sidebar view={view} onNavigate={navigate} settings={settings} />
+      <Sidebar
+        view={view}
+        onNavigate={navigate}
+        settings={settings}
+        dueCount={guided || activeLessonId != null ? 0 : dueCount}
+      />
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
-        {activeLessonId != null ? (
+        {guided ? (
+          <GuidedScreen settings={settings} session={guided} onExit={closeGuided} />
+        ) : activeLessonId != null ? (
           <LessonScreen
             lessonId={activeLessonId}
             onBack={() => {
               setActiveLessonId(null)
               setRefreshKey((value) => value + 1)
+              refreshBadges()
             }}
             onCompleted={completeLesson}
           />
@@ -107,6 +150,11 @@ export default function App(): JSX.Element {
             onOpenLesson={openLesson}
             onOpenCatalog={() => navigate('lessons')}
             onOpenSettings={() => navigate('settings')}
+            onOpenTutor={openTutor}
+            onOpenReview={() => navigate('review')}
+            onOpenNotebook={() => navigate('notebook')}
+            onStartGuided={startGuided}
+            onResumeGuided={startGuided}
           />
         ) : view === 'lessons' ? (
           <LessonsScreen
@@ -115,8 +163,17 @@ export default function App(): JSX.Element {
             onOpenLesson={openLesson}
             onOpenSettings={() => navigate('settings')}
           />
-        ) : view === 'chat' ? (
-          <ChatScreen settings={settings} onOpenSettings={() => navigate('settings')} />
+        ) : view === 'tutor' ? (
+          <TutorScreen
+            key={`tutor-${refreshKey}-${tutorConversation ?? 'new'}`}
+            settings={settings}
+            onOpenSettings={() => navigate('settings')}
+            initialConversationId={tutorConversation}
+          />
+        ) : view === 'review' ? (
+          <ReviewScreen key={`review-${refreshKey}`} onChanged={refreshBadges} />
+        ) : view === 'notebook' ? (
+          <NotebookScreen key={`notebook-${refreshKey}`} />
         ) : (
           <SettingsScreen settings={settings} onChanged={setSettings} />
         )}

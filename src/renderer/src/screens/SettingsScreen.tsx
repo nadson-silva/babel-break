@@ -72,6 +72,12 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
   const [testing, setTesting] = useState<ProviderId | null>(null)
   const [results, setResults] = useState<Partial<Record<ProviderId, TestResult>>>({})
   const [error, setError] = useState<string | null>(null)
+  // O modelo vem como <select>; o input livre fica sob demanda (e é o padrão
+  // quando o provedor está inacessível e não há lista para montar).
+  const [manualModel, setManualModel] = useState<Record<ProviderId, boolean>>({
+    gemini: false,
+    ollama: false
+  })
 
   useEffect(() => {
     setForm(toForm(settings))
@@ -179,6 +185,14 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
   const secure = settings.secureStorage.available && settings.secureStorage.backend !== 'basic_text'
   const modelKey = form.provider === 'gemini' ? 'geminiModel' : 'ollamaModel'
   const modelValue = form[modelKey]
+  const modelList = models[form.provider]
+  const showManualInput = manualModel[form.provider] || modelList.length === 0
+
+  function pickModel(value: string): void {
+    setForm((current) =>
+      form.provider === 'gemini' ? { ...current, geminiModel: value } : { ...current, ollamaModel: value }
+    )
+  }
 
   return (
     <div className="flex h-full flex-col">
@@ -305,34 +319,67 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
               </button>
             }
           >
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <input
-                list={`models-${form.provider}`}
-                value={modelValue}
-                onChange={(event) => {
-                  const value = event.target.value
-                  setForm((current) =>
-                    form.provider === 'gemini'
-                      ? { ...current, geminiModel: value }
-                      : { ...current, ollamaModel: value }
-                  )
-                }}
-                placeholder={form.provider === 'gemini' ? 'gemini-2.5-flash' : 'qwen3:8b'}
-                className="min-w-0 flex-1 rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50"
-              />
-              <datalist id={`models-${form.provider}`}>
-                {models[form.provider].map((model) => (
-                  <option key={model.id} value={model.id} />
-                ))}
-              </datalist>
-              <button
-                type="button"
-                onClick={() => void test(form.provider)}
-                disabled={testing !== null}
-                className="rounded-lg border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-40"
-              >
-                {testing === form.provider ? t.common.testing : t.common.test}
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                {showManualInput ? (
+                  <input
+                    value={modelValue}
+                    onChange={(event) => pickModel(event.target.value)}
+                    placeholder={form.provider === 'gemini' ? 'gemini-2.5-flash' : 'qwen3.5:0.8b'}
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50"
+                  />
+                ) : (
+                  <select
+                    value={modelValue}
+                    onChange={(event) => pickModel(event.target.value)}
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none focus:border-accent/50"
+                  >
+                    {!modelValue && <option value="">—</option>}
+                    {modelValue && !modelList.some((model) => model.id === modelValue) && (
+                      <option value={modelValue}>{modelValue} (não listado)</option>
+                    )}
+                    {modelList.map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.label}
+                        {model.description ? ` · ${model.description}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void test(form.provider)}
+                  disabled={testing !== null}
+                  className="shrink-0 rounded-lg border border-line px-4 py-2 text-sm text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-40"
+                >
+                  {testing === form.provider ? t.common.testing : t.common.test}
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                {modelList.length > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setManualModel((current) => ({ ...current, [form.provider]: !manualModel[form.provider] }))
+                    }
+                    className="text-[11px] text-muted underline underline-offset-2 hover:text-ink"
+                  >
+                    {manualModel[form.provider] ? t.settings.chooseFromList : t.settings.typeManually}
+                  </button>
+                ) : (
+                  <span className="text-[11px] text-faint">
+                    {modelErrors[form.provider] ? t.settings.modelsUnavailable : t.settings.modelsLoading}
+                  </span>
+                )}
+                {modelList.length > 0 && (
+                  <span className="text-[11px] text-faint">
+                    {t.settings.modelsFound
+                      .replace('{count}', String(modelList.length))
+                      .replace('{provider}', form.provider === 'gemini' ? 'Gemini' : 'Ollama')}
+                  </span>
+                )}
+              </div>
             </div>
 
             {modelErrors[form.provider] && (

@@ -1,4 +1,4 @@
-import { integer, primaryKey, real, sqliteTable, text } from 'drizzle-orm/sqlite-core'
+import { integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const profiles = sqliteTable('profiles', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -92,22 +92,42 @@ export const errors = sqliteTable('errors', {
   original: text('original').notNull(),
   corrected: text('corrected').notNull(),
   context: text('context'),
-  resolvedAt: integer('resolved_at'),
-  createdAt: integer('created_at').notNull()
+  /** Explicação em PT-BR (vem do banco de interferência ou da IA). */
+  note: text('note'),
+  /** Quantas vezes o aluno cometeu exatamente este erro (recorrência). */
+  occurrences: integer('occurrences').notNull().default(1),
+  /** 'bank' = correção determinística do banco PT-BR; 'ai' = avaliada pelo modelo. */
+  source: text('source'),
+  createdAt: integer('created_at').notNull(),
+  lastSeenAt: integer('last_seen_at').notNull().default(0),
+  resolvedAt: integer('resolved_at')
 })
 
-export const cards = sqliteTable('cards', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  profileId: integer('profile_id').notNull(),
-  content: text('content').notNull(),
-  stability: real('stability'),
-  difficulty: real('difficulty'),
-  due: integer('due').notNull(),
-  reps: integer('reps').notNull().default(0),
-  lapses: integer('lapses').notNull().default(0),
-  state: text('state').notNull().default('new'),
-  createdAt: integer('created_at').notNull()
-})
+export const cards = sqliteTable(
+  'cards',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    profileId: integer('profile_id').notNull(),
+    content: text('content').notNull(),
+    kind: text('kind').notNull().default('vocab'),
+    /** De onde o card veio: lesson|error|conversation|guided|bank. */
+    source: text('source').notNull().default('lesson'),
+    lessonId: integer('lesson_id'),
+    /** Chave de deduplicação por perfil (nada de card repetido). */
+    dedupeKey: text('dedupe_key'),
+    /** Estado serializado do algoritmo FSRS (fonte da verdade do agendamento). */
+    schedule: text('schedule'),
+    stability: real('stability'),
+    difficulty: real('difficulty'),
+    due: integer('due').notNull(),
+    reps: integer('reps').notNull().default(0),
+    lapses: integer('lapses').notNull().default(0),
+    state: text('state').notNull().default('new'),
+    lastReviewAt: integer('last_review_at'),
+    createdAt: integer('created_at').notNull()
+  },
+  (t) => [uniqueIndex('cards_profile_dedupe_idx').on(t.profileId, t.dedupeKey)]
+)
 
 export const reviews = sqliteTable('reviews', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -145,7 +165,10 @@ export const conversations = sqliteTable('conversations', {
   topic: text('topic'),
   scenario: text('scenario'),
   summary: text('summary'),
-  createdAt: integer('created_at').notNull()
+  createdAt: integer('created_at').notNull(),
+  lastMessageAt: integer('last_message_at').notNull().default(0),
+  /** Fechamento da conversa: recap de correções feito, cards gerados. */
+  closedAt: integer('closed_at')
 })
 
 export const messages = sqliteTable('messages', {
@@ -153,6 +176,8 @@ export const messages = sqliteTable('messages', {
   conversationId: integer('conversation_id').notNull(),
   role: text('role').notNull(),
   content: text('content').notNull(),
+  /** Correções inline da mensagem do aluno (JSON de Correction[]). */
+  corrections: text('corrections'),
   createdAt: integer('created_at').notNull()
 })
 

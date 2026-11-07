@@ -22,6 +22,13 @@
       "when": 1794018418525,
       "tag": "0002_icy_changeling",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794020992950,
+      "tag": "0003_naive_the_phantom",
+      "breakpoints": true
     }
   ]
 }

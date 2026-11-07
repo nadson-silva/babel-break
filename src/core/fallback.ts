@@ -1,5 +1,7 @@
 import type { CefrLevel } from '../shared/types'
-import type { CurriculumOutput, ExerciseSetOutput, LessonContentOutput } from './schemas'
+import type { ErrorFocusEntry } from './adapt'
+import { bankEntries } from './interference'
+import type { CurriculumOutput, ExerciseSetOutput, GeneratedExercise, LessonContentOutput } from './schemas'
 
 interface FallbackLesson {
   title: string
@@ -133,12 +135,15 @@ export function fallbackLessonContent(input: {
   title: string
   objective: string
   level: CefrLevel
+  errors?: ErrorFocusEntry[]
 }): LessonContentOutput {
   const exampleSet = [
     { en: 'I study English every day.', pt: 'Eu estudo inglês todos os dias.' },
     { en: 'She works from home on Mondays.', pt: 'Ela trabalha de casa às segundas.' },
     { en: 'They like to practice together.', pt: 'Eles gostam de praticar juntos.' }
   ]
+
+  const focus = input.errors ?? []
 
   return {
     title: input.title,
@@ -147,7 +152,9 @@ export function fallbackLessonContent(input: {
     explanation: [
       `Nesta lição você vai praticar ${input.title.toLowerCase()}.`,
       `O foco é ${input.objective.toLowerCase()}. Leia os exemplos em voz alta, observe a estrutura e depois pratique nos exercícios.`,
-      'Não se preocupe em acertar tudo de primeira: errar faz parte do processo.'
+      focus.length > 0
+        ? `Atenção especial aos seus erros recorrentes: ${focus.map((entry) => `"${entry.original}" → "${entry.corrected}"`).join('; ')}.`
+        : 'Não se preocupe em acertar tudo de primeira: errar faz parte do processo.'
     ].join('\n\n'),
     examples: exampleSet,
     grammarPoints: [
@@ -157,6 +164,7 @@ export function fallbackLessonContent(input: {
         examples: exampleSet.map((example) => example.en)
       }
     ],
+    pitfalls: focus.length > 0 ? pitfallsFrom(focus) : pitfallsFrom(bankEntries().slice(0, 2).map(toBankFocus)),
     vocabulary: [
       { term: 'study', translation: 'estudar', example: 'I study English.' },
       { term: 'work', translation: 'trabalhar', example: 'She works from home.' },
@@ -166,6 +174,39 @@ export function fallbackLessonContent(input: {
       { term: 'together', translation: 'juntos', example: 'We practice together.' }
     ]
   }
+}
+
+/**
+ * Armadilhas PT-BR para o conteúdo local. Vêm do caderno do aluno quando ele
+ * existe; senão do banco de interferência (o app nunca gera lição genérica).
+ */
+export function pitfallsFrom(entries: ErrorFocusEntry[]): LessonContentOutput['pitfalls'] {
+  return entries
+    .slice(0, 3)
+    .filter((entry) => entry.original && entry.corrected)
+    .map((entry) => ({
+      tag: entry.tag,
+      wrong: entry.original,
+      right: entry.corrected,
+      note: entry.note ?? `Erro recorrente: use "${entry.corrected}".`
+    }))
+}
+
+function toBankFocus(entry: { tag: string; wrong: string; right: string; note: string }): ErrorFocusEntry {
+  return {
+    tag: entry.tag,
+    occurrences: 0,
+    original: entry.wrong,
+    corrected: entry.right,
+    note: entry.note,
+    source: 'bank'
+  }
+}
+
+function focusEntries(errors: ErrorFocusEntry[]): ErrorFocusEntry[] {
+  const student = errors.filter((entry) => entry.source === 'student')
+  if (student.length > 0) return student
+  return bankEntries().slice(0, 3).map(toBankFocus)
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -186,78 +227,128 @@ function missingWord(sentence: string): { prompt: string; answer: string } {
   return { prompt, answer }
 }
 
-export function fallbackExercises(content: LessonContentOutput): ExerciseSetOutput {
+/** Reconstruir a frase certa é o drill determinístico do erro recorrente. */
+function orderFromFocus(entry: ErrorFocusEntry): GeneratedExercise {
+  const sentence = entry.corrected.replace(/^["“]|["”]$/g, '').trim()
+  const tokens = sentence.split(/\s+/).filter(Boolean)
+
+  return {
+    type: 'order',
+    instruction: `Reconstrua a frase correta (área: ${entry.tag}).`,
+    prompt: entry.note ?? 'Monte a frase correta em inglês.',
+    options: [],
+    tokens,
+    answer: sentence,
+    alternatives: [],
+    explanation: `Forma correta: "${sentence}".`,
+    targetTags: [entry.tag]
+  }
+}
+
+/** Reconhecer o erro entre duas frases vem antes de parar de cometê-lo. */
+function spotError(entry: ErrorFocusEntry): GeneratedExercise {
+  const other = bankEntries().filter((item) => item.tag !== entry.tag).slice(0, 2)
+  const options = [...new Set([entry.corrected, entry.original, ...other.map((item) => item.right)])].slice(0, 4)
+
+  return {
+    type: 'multiple_choice',
+    instruction: 'Escolha a frase correta.',
+    prompt: `Qual destas frases está certa em inglês? (área: ${entry.tag})`,
+    options: shuffle(options),
+    tokens: [],
+    answer: entry.corrected,
+    alternatives: [],
+    explanation: entry.note ?? `"${entry.corrected}" é a forma natural.`,
+    targetTags: [entry.tag]
+  }
+}
+
+export function fallbackExercises(content: LessonContentOutput, errors: ErrorFocusEntry[] = []): ExerciseSetOutput {
   const vocab = content.vocabulary.slice(0, 4)
+  const focus = focusEntries(errors)
   const first = content.examples[0]
   const second = content.examples[1] ?? content.examples[0]
   const cloze = missingWord(first.en)
   const orderTokens = second.en.split(/\s+/).filter(Boolean)
 
-  const optionsA = shuffle([vocab[0].translation, vocab[1].translation, vocab[2].translation, vocab[3].translation])
-  const optionsB = shuffle([vocab[1].translation, vocab[0].translation, vocab[2].translation, vocab[3].translation])
+  const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))])
+  const optionsB = shuffle([...new Set([vocab[1].translation, vocab[0].translation, vocab[2].translation, vocab[3].translation])])
 
-  return {
-    exercises: [
-      {
-        type: 'multiple_choice',
-        instruction: 'Escolha a tradução correta.',
-        prompt: `O que significa "${vocab[0].term}"?`,
-        options: optionsA,
-        tokens: [],
-        answer: vocab[0].translation,
-        alternatives: [],
-        explanation: `"${vocab[0].term}" significa "${vocab[0].translation}".`
-      },
-      {
-        type: 'cloze',
-        instruction: 'Complete a frase com a palavra que falta.',
-        prompt: cloze.prompt,
-        options: [],
-        tokens: [],
-        answer: cloze.answer,
-        alternatives: [],
-        explanation: 'Leia a frase completa para conferir o sentido.'
-      },
-      {
-        type: 'order',
-        instruction: 'Ordene as palavras para formar a frase.',
-        prompt: 'Monte a frase correta.',
-        options: [],
-        tokens: orderTokens,
-        answer: second.en,
-        alternatives: [],
-        explanation: 'Observe a ordem sujeito + verbo + complemento.'
-      },
-      {
-        type: 'translate',
-        instruction: 'Traduza a frase para o inglês.',
-        prompt: second.pt,
-        options: [],
-        tokens: [],
-        answer: second.en,
-        alternatives: [],
-        explanation: 'Compare sua tradução com a versão em inglês.'
-      },
-      {
-        type: 'free_production',
-        instruction: 'Escreva uma resposta curta usando o conteúdo da lição.',
-        prompt: `Escreva 2 frases sobre: ${content.objective}`,
-        options: [],
-        tokens: [],
-        answer: `${first.en} ${second.en}`,
-        alternatives: [],
-        explanation: 'Use o vocabulário e a estrutura que você praticou.'
-      },
-      {
-        type: 'multiple_choice',
-        instruction: 'Escolha a tradução correta.',
-        prompt: `O que significa "${vocab[1].term}"?`,
-        options: optionsB,
-        tokens: [],
-        answer: vocab[1].translation,
-        alternatives: [],
-        explanation: `"${vocab[1].term}" significa "${vocab[1].translation}".`
-      }
-    ]
+  const exercises: GeneratedExercise[] = [
+    {
+      type: 'multiple_choice',
+      instruction: 'Escolha a tradução correta.',
+      prompt: `O que significa "${vocab[0].term}"?`,
+      options: optionsA,
+      tokens: [],
+      answer: vocab[0].translation,
+      alternatives: [],
+      explanation: `"${vocab[0].term}" significa "${vocab[0].translation}".`,
+      targetTags: []
+    },
+    {
+      type: 'cloze',
+      instruction: 'Complete a frase com a palavra que falta.',
+      prompt: cloze.prompt,
+      options: [],
+      tokens: [],
+      answer: cloze.answer,
+      alternatives: [],
+      explanation: 'Leia a frase completa para conferir o sentido.',
+      targetTags: []
+    },
+    {
+      type: 'order',
+      instruction: 'Ordene as palavras para formar a frase.',
+      prompt: 'Monte a frase correta.',
+      options: [],
+      tokens: orderTokens,
+      answer: second.en,
+      alternatives: [],
+      explanation: 'Observe a ordem sujeito + verbo + complemento.',
+      targetTags: []
+    },
+    {
+      type: 'translate',
+      instruction: 'Traduza a frase para o inglês.',
+      prompt: second.pt,
+      options: [],
+      tokens: [],
+      answer: second.en,
+      alternatives: [],
+      explanation: 'Compare sua tradução com a versão em inglês.',
+      targetTags: focus[0] ? [focus[0].tag] : []
+    },
+    {
+      type: 'free_production',
+      instruction: 'Escreva uma resposta curta usando o conteúdo da lição.',
+      prompt: `Escreva 2 frases sobre: ${content.objective}`,
+      options: [],
+      tokens: [],
+      answer: `${first.en} ${second.en}`,
+      alternatives: [],
+      explanation: 'Use o vocabulário e a estrutura que você praticou.',
+      targetTags: focus[1] ? [focus[1].tag] : []
+    }
+  ]
+
+  // Os dois últimos exercícios miram o caderno de erros: é a adaptação visível
+  // entre a lição #1 e a lição #2, mesmo sem IA disponível.
+  if (focus[0]) exercises.push(orderFromFocus(focus[0]))
+  if (focus[1]) exercises.push(spotError(focus[1]))
+  else {
+    exercises.push({
+      type: 'multiple_choice',
+      instruction: 'Escolha a tradução correta.',
+      prompt: `O que significa "${vocab[1].term}"?`,
+      options: optionsB,
+      tokens: [],
+      answer: vocab[1].translation,
+      alternatives: [],
+      explanation: `"${vocab[1].term}" significa "${vocab[1].translation}".`,
+      targetTags: []
+    })
   }
+
+  return { exercises: exercises.slice(0, 8) }
 }

@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import type { HomeState, LessonSummary, SettingsPayload } from '../../../shared/types'
+import type { GuidedSession, HomeState, LessonSummary, SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
+import { GUIDED_ORDER, guidedStepPosition, guidedStepTitle } from '../components/guidedSteps'
 
 interface HomeScreenProps {
   settings: SettingsPayload
   onOpenLesson: (lessonId: number) => void
   onOpenCatalog: () => void
   onOpenSettings: () => void
+  onOpenTutor: (conversationId?: number) => void
+  onOpenReview: () => void
+  onOpenNotebook: () => void
+  onStartGuided: (session: GuidedSession) => void
+  onResumeGuided: (session: GuidedSession) => void
 }
 
 function messageOf(error: unknown): string {
@@ -26,23 +32,60 @@ function statusColor(lesson: LessonSummary): string {
   return 'bg-faint/50'
 }
 
+function EntryCard({
+  title,
+  body,
+  cta,
+  onClick,
+  disabled,
+  accent
+}: {
+  title: string
+  body: string
+  cta: string
+  onClick: () => void
+  disabled?: boolean
+  accent?: boolean
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`flex flex-col rounded-2xl border p-5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+        accent
+          ? 'border-accent/40 bg-accent-soft/30 hover:bg-accent-soft/50'
+          : 'border-line bg-panel hover:bg-panel-2'
+      }`}
+    >
+      <h3 className="text-sm font-semibold text-ink">{title}</h3>
+      <p className="mt-1 flex-1 text-xs leading-relaxed text-muted">{body}</p>
+      <span className={`mt-3 text-xs font-medium ${accent ? 'text-accent' : 'text-muted'}`}>{cta} →</span>
+    </button>
+  )
+}
+
 export function HomeScreen({
   settings,
   onOpenLesson,
   onOpenCatalog,
-  onOpenSettings
+  onOpenSettings,
+  onOpenTutor,
+  onOpenReview,
+  onOpenNotebook,
+  onStartGuided,
+  onResumeGuided
 }: HomeScreenProps): JSX.Element {
   const [data, setData] = useState<HomeState | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [startingGuided, setStartingGuided] = useState(false)
   const started = useRef(false)
 
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
 
   async function load(): Promise<void> {
-    const state = await window.api.learning.home.get()
-    setData(state)
-    return
+    setData(await window.api.learning.home.get())
   }
 
   async function generate(): Promise<void> {
@@ -56,6 +99,19 @@ export function HomeScreen({
       setError(messageOf(generateError))
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function startGuided(): Promise<void> {
+    setStartingGuided(true)
+    setError(null)
+    try {
+      const session = await window.api.guided.start()
+      onStartGuided(session)
+    } catch (guidedError) {
+      setError(messageOf(guidedError))
+    } finally {
+      setStartingGuided(false)
     }
   }
 
@@ -94,6 +150,8 @@ export function HomeScreen({
   const total = data?.totalCount ?? 0
   const done = data?.completedCount ?? 0
   const progress = total > 0 ? Math.round((done / total) * 100) : 0
+  const due = data?.review.due ?? 0
+  const openErrors = data?.notebook.open ?? 0
 
   return (
     <div className="flex h-full min-w-0 flex-col">
@@ -139,7 +197,7 @@ export function HomeScreen({
                 onClick={onOpenSettings}
                 className="shrink-0 rounded-lg border border-warn/40 px-3 py-1.5 font-medium transition-colors hover:bg-warn/10"
               >
-                {t.chat.openSettings}
+                {t.common.openSettings}
               </button>
             </div>
           )}
@@ -158,7 +216,7 @@ export function HomeScreen({
                 disabled={generating || !model}
                 className="mt-5 rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {generating ? `${t.home.generating}` : t.home.generateCta}
+                {generating ? t.home.generating : t.home.generateCta}
               </button>
             </section>
           ) : (
@@ -183,34 +241,125 @@ export function HomeScreen({
                   </section>
                 )}
 
-                {data.nextLesson && (
-                  <section className="rounded-2xl border border-line bg-panel p-5">
-                    <div className="text-[10px] uppercase tracking-wider text-faint">
-                      {t.home.nextTitle}
-                    </div>
-                    <h2 className="mt-2 text-base font-semibold">{data.nextLesson.title}</h2>
+                {data.guided && data.guided.recap === null ? (
+                  <section className="rounded-2xl border border-accent/40 bg-accent-soft/30 p-5">
+                    <div className="text-[10px] uppercase tracking-wider text-accent">{t.guided.title}</div>
+                    <h2 className="mt-2 text-base font-semibold">{guidedStepTitle(data.guided.step)}</h2>
                     <p className="mt-1 text-xs text-muted">
-                      {t.home.nextBody
-                        .replace('{title}', data.nextLesson.title)
-                        .replace('{level}', data.nextLesson.level)}
+                      {t.guided.stepOf
+                        .replace('{current}', String(guidedStepPosition(data.guided.step)))
+                        .replace('{total}', String(GUIDED_ORDER.length))}{' '}
+                      · {data.guided.lessonTitle ?? t.guided.stepLesson}
                     </p>
                     <button
                       type="button"
-                      onClick={() => onOpenLesson(data.nextLesson!.id)}
+                      onClick={() => onResumeGuided(data.guided!)}
+                      className="mt-4 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                    >
+                      {t.home.continueCta}
+                    </button>
+                  </section>
+                ) : (
+                  data.nextLesson && (
+                    <section className="rounded-2xl border border-line bg-panel p-5">
+                      <div className="text-[10px] uppercase tracking-wider text-faint">
+                        {t.home.nextTitle}
+                      </div>
+                      <h2 className="mt-2 text-base font-semibold">{data.nextLesson.title}</h2>
+                      <p className="mt-1 text-xs text-muted">
+                        {t.home.nextBody
+                          .replace('{title}', data.nextLesson.title)
+                          .replace('{level}', data.nextLesson.level)}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onOpenLesson(data.nextLesson!.id)}
+                        className="mt-4 rounded-lg border border-line px-4 py-2 text-xs font-medium text-ink transition-colors hover:border-accent/50 hover:text-accent"
+                      >
+                        {t.home.nextCta}
+                      </button>
+                    </section>
+                  )
+                )}
+
+                {data.continueConversation && (
+                  <section className="rounded-2xl border border-line bg-panel p-5">
+                    <div className="text-[10px] uppercase tracking-wider text-faint">
+                      {t.home.continueChatTitle}
+                    </div>
+                    <h2 className="mt-2 text-base font-semibold">
+                      {data.continueConversation.topic ?? data.continueConversation.lessonTitle ?? t.tutor.title}
+                    </h2>
+                    <p className="mt-1 text-xs text-muted">
+                      {t.home.continueChatBody.replace(
+                        '{topic}',
+                        data.continueConversation.topic ?? t.tutor.title
+                      )}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onOpenTutor(data.continueConversation!.id)}
                       className="mt-4 rounded-lg border border-line px-4 py-2 text-xs font-medium text-ink transition-colors hover:border-accent/50 hover:text-accent"
                     >
-                      {t.home.nextCta}
+                      {t.home.continueChatCta}
                     </button>
                   </section>
                 )}
-
-                {!data.continueLesson && !data.nextLesson && (
-                  <section className="rounded-2xl border border-line bg-panel p-5 md:col-span-2">
-                    <h2 className="text-base font-semibold">{t.home.emptyTitle}</h2>
-                    <p className="mt-1 text-xs text-muted">{t.home.emptyBody}</p>
-                  </section>
-                )}
               </div>
+
+              <section className="space-y-3">
+                <h2 className="text-sm font-semibold text-ink">{t.home.entriesTitle}</h2>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <EntryCard
+                    title={t.home.entryLesson}
+                    body={t.home.entryLessonBody}
+                    cta={t.home.nextCta}
+                    onClick={onOpenCatalog}
+                  />
+                  <EntryCard
+                    title={t.home.entryChat}
+                    body={t.home.entryChatBody}
+                    cta={t.home.continueChatCta}
+                    onClick={() => onOpenTutor()}
+                  />
+                  <EntryCard
+                    accent
+                    title={t.home.entryGuided}
+                    body={t.home.entryGuidedBody}
+                    cta={startingGuided ? t.guided.starting : t.guided.start}
+                    onClick={() => void startGuided()}
+                    disabled={startingGuided || !model}
+                  />
+                  <EntryCard
+                    title={t.home.entryReview}
+                    body={
+                      due > 0
+                        ? t.home.entryReviewBody.replace('{count}', String(due))
+                        : t.home.entryReviewBodyEmpty
+                    }
+                    cta={t.review.title}
+                    onClick={onOpenReview}
+                  />
+                  <EntryCard
+                    title={t.home.entryNotebook}
+                    body={
+                      openErrors > 0
+                        ? t.home.entryNotebookBody.replace('{count}', String(openErrors))
+                        : t.home.entryNotebookBodyEmpty
+                    }
+                    cta={t.nav.notebook}
+                    onClick={onOpenNotebook}
+                  />
+                  <EntryCard
+                    title={t.home.progress}
+                    body={t.home.completed
+                      .replace('{done}', String(done))
+                      .replace('{total}', String(total))}
+                    cta={t.home.catalogCta}
+                    onClick={onOpenCatalog}
+                  />
+                </div>
+              </section>
 
               <section className="rounded-2xl border border-line bg-panel p-5">
                 <div className="flex items-center justify-between">
@@ -224,15 +373,32 @@ export function HomeScreen({
                 </div>
               </section>
 
+              {data.notebook.tags.length > 0 && (
+                <section className="rounded-2xl border border-accent/40 bg-accent-soft/30 p-5">
+                  <div className="text-[10px] uppercase tracking-wider text-accent">{t.home.focusTitle}</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {data.notebook.tags.map((entry) => (
+                      <button
+                        key={entry.tag}
+                        type="button"
+                        onClick={onOpenNotebook}
+                        className="rounded-full border border-line bg-panel px-3 py-1 text-xs text-ink transition-colors hover:border-accent/50"
+                      >
+                        {entry.tag}
+                        {entry.occurrences > 1 ? ` · ${entry.occurrences}x` : ''}
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
+
               <section className="space-y-3">
                 {data.units.map((unit) => (
                   <div key={unit.id} className="rounded-2xl border border-line bg-panel p-5">
                     <div className="flex items-center justify-between gap-3">
                       <div>
                         <h2 className="text-sm font-semibold">{unit.title}</h2>
-                        {unit.description && (
-                          <p className="mt-0.5 text-xs text-muted">{unit.description}</p>
-                        )}
+                        {unit.description && <p className="mt-0.5 text-xs text-muted">{unit.description}</p>}
                       </div>
                       <span className="shrink-0 rounded-full bg-panel-2 px-2.5 py-1 text-[10px] uppercase tracking-wider text-faint">
                         {unit.level}
@@ -260,14 +426,6 @@ export function HomeScreen({
                   </div>
                 ))}
               </section>
-
-              <button
-                type="button"
-                onClick={onOpenCatalog}
-                className="w-full rounded-xl border border-line bg-panel px-4 py-3 text-sm text-muted transition-colors hover:border-accent/40 hover:text-ink"
-              >
-                {t.home.catalogCta}
-              </button>
             </>
           )}
         </div>
