@@ -1,0 +1,49 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-surface: #0b0f14;
+  --color-panel: #111823;
+  --color-panel-2: #16202e;
+  --color-line: #223044;
+  --color-line-soft: #1a2534;
+  --color-ink: #e7eef7;
+  --color-muted: #8ea3ba;
+  --color-faint: #5f748c;
+  --color-accent: #4cc2a0;
+  --color-accent-soft: #14322a;
+  --color-accent-ink: #0a1f19;
+  --color-warn: #e6b455;
+  --color-warn-soft: #33280f;
+  --color-danger: #e57070;
+  --color-danger-soft: #351a1a;
+  --font-sans: 'Inter', 'Noto Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-ink font-sans antialiased;
+  overflow: hidden;
+}
+
+::selection {
+  background-color: color-mix(in oklab, var(--color-accent) 35%, transparent);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+button:not(:disabled) {
+  cursor: pointer;
+}
+
+textarea,
+input {
+  font: inherit;
+}
