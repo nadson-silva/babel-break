@@ -5,6 +5,7 @@ import type {
   ConversationSummary,
   ConversationView,
   CurriculumView,
+  FocusTrackView,
   GradeFeedback,
   GuidedSession,
   GuidedStep,
@@ -22,8 +23,14 @@ import type {
   ReviewRating,
   ReviewResult,
   ReviewState,
+  ScenarioFeedbackView,
+  ScenarioRunView,
+  ScenarioSession,
+  ScenarioView,
   SettingsPayload,
   TestResult,
+  TrackPlanLesson,
+  TracksView,
   TutorSendRequest
 } from '../shared/types'
 
@@ -113,6 +120,29 @@ const api = {
     home: {
       get: (): Promise<HomeState> => ipcRenderer.invoke('home:get')
     }
+  },
+  /** Trilhas de foco: rascunho → revisão do esboço → aprovação. */
+  tracks: {
+    list: (): Promise<TracksView> => ipcRenderer.invoke('track:list'),
+    draft: (input: { objective: string; replaceId?: number }): Promise<FocusTrackView> =>
+      ipcRenderer.invoke('track:draft', input),
+    revise: (input: { trackId: number; lessons: TrackPlanLesson[] }): Promise<FocusTrackView> =>
+      ipcRenderer.invoke('track:revise', input),
+    approve: (trackId: number): Promise<FocusTrackView> => ipcRenderer.invoke('track:approve', trackId),
+    discard: (trackId: number): Promise<void> => ipcRenderer.invoke('track:discard', trackId),
+    status: (input: { trackId: number; status: 'active' | 'archived' }): Promise<FocusTrackView> =>
+      ipcRenderer.invoke('track:status', input)
+  },
+  /** Modo cenário: roleplay com persona + rubrica de tarefa no fechamento. */
+  scenario: {
+    open: (input: { lessonId?: number | null; topic?: string | null }): Promise<ScenarioSession> =>
+      ipcRenderer.invoke('scenario:open', input),
+    finish: (conversationId: number): Promise<ScenarioFeedbackView> =>
+      ipcRenderer.invoke('scenario:finish', conversationId),
+    session: (conversationId: number): Promise<ScenarioSession | null> =>
+      ipcRenderer.invoke('scenario:session', conversationId),
+    runs: (limit?: number): Promise<ScenarioRunView[]> => ipcRenderer.invoke('scenario:runs', limit),
+    refresh: (lessonId: number): Promise<ScenarioView> => ipcRenderer.invoke('scenario:refresh', lessonId)
   }
 }
 

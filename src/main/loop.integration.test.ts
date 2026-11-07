@@ -181,7 +181,7 @@ describe('sessão guiada', () => {
     expect(activeGuidedSession(profileId)?.step).toBe('practice')
 
     advanceGuidedSession(profileId, 'tutor')
-    const finished = finishGuidedSession(profileId, { reviewDone: 1, practice: { correct: 3, total: 6 } })
+    const finished = await finishGuidedSession(profileId, { reviewDone: 1, practice: { correct: 3, total: 6 } })
 
     expect(finished.step).toBe('recap')
     expect(finished.recap).not.toBeNull()

@@ -4,6 +4,7 @@ import type {
   ConversationSummary,
   ConversationView,
   CurriculumView,
+  FocusTrackView,
   GradeFeedback,
   GuidedSession,
   GuidedStep,
@@ -21,8 +22,14 @@ import type {
   ReviewRating,
   ReviewResult,
   ReviewState,
+  ScenarioFeedbackView,
+  ScenarioRunView,
+  ScenarioSession,
+  ScenarioView,
   SettingsPayload,
   TestResult,
+  TrackPlanLesson,
+  TracksView,
   TutorSendRequest
 } from '../shared/types'
 
@@ -96,6 +103,21 @@ declare global {
         home: {
           get(): Promise<HomeState>
         }
+      }
+      tracks: {
+        list(): Promise<TracksView>
+        draft(input: { objective: string; replaceId?: number }): Promise<FocusTrackView>
+        revise(input: { trackId: number; lessons: TrackPlanLesson[] }): Promise<FocusTrackView>
+        approve(trackId: number): Promise<FocusTrackView>
+        discard(trackId: number): Promise<void>
+        status(input: { trackId: number; status: 'active' | 'archived' }): Promise<FocusTrackView>
+      }
+      scenario: {
+        open(input: { lessonId?: number | null; topic?: string | null }): Promise<ScenarioSession>
+        finish(conversationId: number): Promise<ScenarioFeedbackView>
+        session(conversationId: number): Promise<ScenarioSession | null>
+        runs(limit?: number): Promise<ScenarioRunView[]>
+        refresh(lessonId: number): Promise<ScenarioView>
       }
     }
   }

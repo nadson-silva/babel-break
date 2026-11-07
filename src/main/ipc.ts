@@ -3,6 +3,8 @@ import type { AppSettings, ProviderId, SettingsPayload, TestResult } from '../sh
 import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
+import { registerScenarioIpc } from './scenario'
+import { registerTracksIpc } from './tracks'
 import { getProvider } from './providers'
 import {
   clearGeminiApiKey,
@@ -76,4 +78,6 @@ export function registerIpcHandlers(): void {
   registerLearningIpc()
   registerHomeIpc()
   registerLoopIpc()
+  registerTracksIpc()
+  registerScenarioIpc()
 }

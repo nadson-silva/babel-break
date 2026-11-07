@@ -164,12 +164,16 @@ export interface LessonSummary {
   id: number
   unitId: number | null
   unitTitle: string | null
+  trackId: number | null
+  trackTitle: string | null
   title: string
   level: CefrLevel
   position: number
   status: LessonStatus
   score: number | null
   hasContent: boolean
+  /** Lição de trilha que fecha com roleplay. */
+  isScenario: boolean
 }
 
 export interface UnitView {
@@ -238,6 +242,120 @@ export interface HomeState {
   notebook: { open: number; tags: { tag: string; occurrences: number }[] }
   continueConversation: ConversationSummary | null
   guided: GuidedSession | null
+  /** Trilhas ativas + próximo passo sugerido, já com o mix de foco aplicado. */
+  tracks: FocusTrackView[]
+  suggestion: NextSuggestion | null
+}
+
+// --- Trilhas de foco e cenário (M3) ------------------------------------------
+
+export type TrackStatus = 'draft' | 'active' | 'archived'
+
+export type TrackSource = 'user' | 'suggested'
+
+export interface TrackPlanLesson {
+  title: string
+  objective: string
+  focusVocabulary: string[]
+}
+
+export interface TrackPlanDraft {
+  title: string
+  goalTag: string
+  objective: string
+  level: CefrLevel
+  levelRange: string
+  lessons: TrackPlanLesson[]
+  /** 'fallback' quando o esboço veio do banco determinístico, sem IA. */
+  source: 'ai' | 'fallback'
+}
+
+export interface TrackSuggestionView {
+  title: string
+  objective: string
+  goalTag: string
+}
+
+export interface FocusTrackView {
+  id: number
+  title: string
+  objective: string | null
+  goalTag: string | null
+  levelRange: string | null
+  status: TrackStatus
+  source: TrackSource
+  createdAt: number
+  approvedAt: number | null
+  /** Esboço revisável: existe desde o rascunho, antes de virar lição. */
+  plan: TrackPlanDraft | null
+  lessons: LessonSummary[]
+  completedCount: number
+  totalCount: number
+  nextLesson: LessonSummary | null
+  scenarioLesson: LessonSummary | null
+}
+
+export interface TracksView {
+  active: FocusTrackView[]
+  drafts: FocusTrackView[]
+  archived: FocusTrackView[]
+  suggestions: TrackSuggestionView[]
+  focusMix: number
+}
+
+export interface NextSuggestion {
+  lesson: LessonSummary
+  /** De onde veio a sugestão: currículo base ou trilha de foco. */
+  origin: 'base' | 'focus'
+  reason: string
+}
+
+export interface ScenarioView {
+  persona: string
+  setting: string
+  successCriteria: string[]
+  openingLine: string
+  source: 'ai' | 'fallback'
+}
+
+export interface ScenarioPhrase {
+  original: string
+  improved: string
+  reason: string
+}
+
+export interface ScenarioFeedbackView {
+  runId: number
+  conversationId: number
+  lessonId: number | null
+  contentScore: number
+  languageScore: number
+  feedback: string
+  bestPhrases: ScenarioPhrase[]
+  followUpDrill: string
+  /** Tarefas cumpridas da rubrica (para exibir checklist marcado). */
+  criteria: { criterion: string; met: boolean }[]
+  cardsCreated: number
+  levelChange: { from: CefrLevel; to: CefrLevel } | null
+  source: 'ai' | 'fallback'
+  createdAt: number
+}
+
+export interface ScenarioRunView {
+  id: number
+  lessonId: number | null
+  lessonTitle: string | null
+  conversationId: number
+  contentScore: number | null
+  languageScore: number | null
+  feedback: string | null
+  createdAt: number
+}
+
+export interface ScenarioSession {
+  conversation: ConversationSummary
+  scenario: ScenarioView
+  run: ScenarioFeedbackView | null
 }
 
 // --- O loop (M2) -------------------------------------------------------------
@@ -278,6 +396,8 @@ export interface ConversationView {
   conversation: ConversationSummary
   messages: TutorMessage[]
   summary: string | null
+  /** Presente quando a conversa é um roleplay (M3). */
+  scenario: ScenarioView | null
 }
 
 export type ReviewRating = 'again' | 'hard' | 'good' | 'easy'
@@ -380,6 +500,8 @@ export interface RecapView {
   practice?: { correct: number; total: number }
   levelChange: { from: CefrLevel; to: CefrLevel } | null
   message: string
+  /** Rubrica do roleplay, quando o fechamento incluiu um cenário (M3). */
+  scenario?: ScenarioFeedbackView | null
 }
 
 export interface GuidedSession {
@@ -392,5 +514,7 @@ export interface GuidedSession {
   practice: { correct: number; total: number }
   startedAt: number
   recap: RecapView | null
+  /** Passo 4 é roleplay com rubrica (lição de trilha marcada para cenário). */
+  isScenario: boolean
 }
 

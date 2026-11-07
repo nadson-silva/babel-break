@@ -23,6 +23,7 @@ import type {
 import type { ErrorFocusEntry } from '../core/adapt'
 import { clampLevel, levelIndex, levelFromScore, CEFR_LEVELS } from '../core/cefr'
 import { fallbackCurriculum, fallbackExercises, fallbackLessonContent, pitfallsFrom } from '../core/fallback'
+import { fallbackTrackVocabulary } from '../core/tracks'
 import {
   gradeDeterministic,
   normalizeText,
@@ -51,11 +52,11 @@ import { generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
 import { errorHints, focusFor, recordCorrections } from './notebook'
 import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors } from './review'
+import { ownerOfLesson, openTrackLessons, trackContextOf, type LessonOwner } from './tracks'
 import { applyReestimation } from './tutor'
 import { getSettings } from './settings'
 
 type ProfileRow = typeof schema.profiles.$inferSelect
-type UnitRow = typeof schema.units.$inferSelect
 type LessonRow = typeof schema.lessons.$inferSelect
 type ExerciseRow = typeof schema.exercises.$inferSelect
 type ProgressRow = typeof schema.lessonProgress.$inferSelect
@@ -170,7 +171,7 @@ function setSkill(profileId: number, skill: SkillId, estimate: number, confidenc
     .run()
 }
 
-function blendSkill(profileId: number, skill: SkillId, sample: number): void {
+export function blendSkill(profileId: number, skill: SkillId, sample: number): void {
   const db = getDb()
   const existing = db
     .select()
@@ -217,17 +218,20 @@ function recordExerciseError(
   })
 }
 
-function summaryOf(lesson: LessonRow, unitTitle: string | null, progress: ProgressRow | undefined): LessonSummary {
+function summaryOf(lesson: LessonRow, progress: ProgressRow | undefined, owner?: Partial<LessonOwner>): LessonSummary {
   return {
     id: lesson.id,
-    unitId: lesson.unitId,
-    unitTitle,
+    unitId: owner?.unitId ?? lesson.unitId,
+    unitTitle: owner?.unitTitle ?? null,
+    trackId: owner?.trackId ?? lesson.trackId,
+    trackTitle: owner?.trackTitle ?? null,
     title: lesson.title,
     level: toCefr(lesson.level),
     position: lesson.position,
     status: toStatus(progress?.status),
     score: progress?.score ?? null,
-    hasContent: Boolean(lesson.content)
+    hasContent: Boolean(lesson.content),
+    isScenario: owner?.isScenario ?? false
   }
 }
 
@@ -265,7 +269,15 @@ export function curriculumView(): CurriculumView {
     if (lesson.unitId == null) continue
     const unit = units.find((entry) => entry.id === lesson.unitId)
     const list = lessonsByUnit.get(lesson.unitId) ?? []
-    list.push(summaryOf(lesson, unit?.title ?? null, progressByLesson.get(lesson.id)))
+    list.push(
+      summaryOf(lesson, progressByLesson.get(lesson.id), {
+        unitId: lesson.unitId,
+        unitTitle: unit?.title ?? null,
+        trackId: null,
+        trackTitle: null,
+        isScenario: false
+      })
+    )
     lessonsByUnit.set(lesson.unitId, list)
   }
 
@@ -353,15 +365,21 @@ export function generateCurriculum(): Promise<CurriculumView> {
   return curriculumJob
 }
 
-function getOwnedLesson(lessonId: number, profileId: number): { lesson: LessonRow; unit: UnitRow } | null {
-  const row = getDb()
-    .select({ lesson: schema.lessons, unit: schema.units })
+function getOwnedLesson(
+  lessonId: number,
+  profileId: number
+): { lesson: LessonRow; owner: LessonOwner } | null {
+  const owner = ownerOfLesson(lessonId, profileId)
+  if (!owner) return null
+
+  const lesson = getDb()
+    .select()
     .from(schema.lessons)
-    .innerJoin(schema.units, eq(schema.lessons.unitId, schema.units.id))
-    .where(and(eq(schema.lessons.id, lessonId), eq(schema.units.profileId, profileId)))
+    .where(eq(schema.lessons.id, lessonId))
     .get()
 
-  return row ?? null
+  if (!lesson) return null
+  return { lesson, owner }
 }
 
 function progressOf(profileId: number, lessonId: number): ProgressRow | undefined {
@@ -402,11 +420,13 @@ function toExerciseView(row: ExerciseRow): ExerciseView {
 async function ensureLessonGenerated(
   lesson: LessonRow,
   profile: ProfileRow,
-  unitTitle: string
+  owner: LessonOwner
 ): Promise<ErrorFocusEntry[]> {
   const db = getDb()
   const level = toCefr(lesson.level)
   const focus = focusFor(profile.id, 5)
+  const track = lesson.trackId != null ? trackContextOf(lesson) : null
+  const scopeTitle = owner.trackTitle ?? owner.unitTitle ?? ''
 
   let content = parseJson<LessonContentView>(lesson.content)
 
@@ -415,10 +435,11 @@ async function ensureLessonGenerated(
     const prompt = lessonContentPrompt({
       title: lesson.title,
       objective: lesson.objective ?? lesson.title,
-      unitTitle,
+      unitTitle: scopeTitle,
       level,
       goal: profile.goal ?? '',
-      errors: hints
+      errors: hints,
+      track: track ? { title: track.title, vocabulary: track.vocabulary } : null
     })
 
     let generated: LessonContentOutput
@@ -440,7 +461,8 @@ async function ensureLessonGenerated(
         title: lesson.title,
         objective: lesson.objective ?? lesson.title,
         level,
-        errors: focus
+        errors: focus,
+        vocabulary: track ? fallbackTrackVocabulary(track.goalTag, lesson.position) : undefined
       })
       source = 'fallback'
     }
@@ -499,7 +521,8 @@ async function ensureLessonGenerated(
     content: exerciseLevel,
     level: content.level,
     goal: profile.goal ?? '',
-    errors: hints
+    errors: hints,
+    track: track ? { title: track.title, vocabulary: track.vocabulary } : null
   })
 
   let generated: ExerciseSetOutput
@@ -591,7 +614,7 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  const focus = await ensureLessonGenerated(owned.lesson, profile, owned.unit.title)
+  const focus = await ensureLessonGenerated(owned.lesson, profile, owned.owner)
 
   const fresh = getOwnedLesson(lessonId, profile.id)
   if (!fresh) throw new Error('Lição não encontrada.')
@@ -647,7 +670,7 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
   }
 
   return {
-    lesson: summaryOf(fresh.lesson, fresh.unit.title, progressOf(profile.id, lessonId)),
+    lesson: summaryOf(fresh.lesson, progressOf(profile.id, lessonId), fresh.owner),
     content: { ...content, pitfalls: content.pitfalls ?? pitfallsFrom(focus) },
     exercises: exerciseRows.map(toExerciseView),
     focus,
@@ -828,11 +851,11 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
   return { lessonId: input.lessonId, score, correct, total, cardsCreated, levelChange }
 }
 
-/** Lição em andamento mais recente — base do "continuar de onde parei". */
+/**
+ * Lição em andamento mais recente — base do "continuar de onde parei". Cobre as
+ * duas camadas: uma lição de trilha parada no meio conta igual às do currículo.
+ */
 export function lastOpenedLesson(profileId: number): LessonSummary | null {
-  const curriculum = curriculumView()
-  const lessons = curriculum.units.flatMap((unit) => unit.lessons)
-
   const recent = getDb()
     .select()
     .from(schema.lessonProgress)
@@ -847,7 +870,29 @@ export function lastOpenedLesson(profileId: number): LessonSummary | null {
     .get()
 
   if (!recent) return null
-  return lessons.find((lesson) => lesson.id === recent.lessonId) ?? null
+
+  const owner = ownerOfLesson(recent.lessonId, profileId)
+  if (!owner) return null
+
+  const lesson = getDb()
+    .select()
+    .from(schema.lessons)
+    .where(eq(schema.lessons.id, recent.lessonId))
+    .get()
+
+  if (!lesson) return null
+  return summaryOf(lesson, recent, owner)
+}
+
+/** Lições ainda não concluídas das duas camadas, para a recomendação da home. */
+export function pendingLessons(profileId: number): { base: LessonSummary[]; focus: LessonSummary[] } {
+  const base = curriculumView()
+    .units.flatMap((unit) => unit.lessons)
+    .filter((lesson) => lesson.status !== 'completed')
+
+  const focus = openTrackLessons(profileId)
+
+  return { base, focus }
 }
 
 export async function generatePlacement(goal?: string): Promise<PlacementTest> {

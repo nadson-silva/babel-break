@@ -12,6 +12,7 @@ import { t } from '../i18n/pt-BR'
 import { ExercisePlayer } from '../components/ExercisePlayer'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { TutorPanel } from '../components/TutorPanel'
+import { ScenarioFeedbackPanel } from '../components/ScenarioPanel'
 import { GUIDED_ORDER, guidedStepPosition, guidedStepTitle } from '../components/guidedSteps'
 
 interface GuidedScreenProps {
@@ -249,7 +250,9 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
             <section className="flex min-h-[520px] flex-col rounded-2xl border border-line bg-panel">
               <div className="flex items-center justify-between gap-3 border-b border-line-soft px-5 py-3">
                 <div>
-                  <h2 className="text-sm font-semibold">{t.guided.stepTutor}</h2>
+                  <h2 className="text-sm font-semibold">
+                    {current.isScenario ? t.scenario.start : t.guided.stepTutor}
+                  </h2>
                   <p className="mt-0.5 text-xs text-muted">{t.guided.tutorHelp}</p>
                 </div>
                 <button
@@ -261,7 +264,12 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
                   {t.guided.recapCta}
                 </button>
               </div>
-              <TutorPanel conversationId={current.conversationId} variant="compact" onClosed={() => void recap()} />
+              <TutorPanel
+                conversationId={current.conversationId}
+                variant="compact"
+                onClosed={() => void recap()}
+                onScenarioClosed={() => void recap()}
+              />
             </section>
           )}
 
@@ -319,6 +327,12 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
                     .replace('{from}', current.recap.levelChange.from)
                     .replace('{to}', current.recap.levelChange.to)}
                 </p>
+              )}
+
+              {current.recap?.scenario && (
+                <div className="mt-4">
+                  <ScenarioFeedbackPanel run={current.recap.scenario} />
+                </div>
               )}
 
               <div className="mt-6 flex justify-end">

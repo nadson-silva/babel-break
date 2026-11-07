@@ -9,6 +9,8 @@ interface LessonScreenProps {
   lessonId: number
   onBack: () => void
   onCompleted: () => void
+  /** Lição de trilha marcada para roleplay: fechar a lição em cenário. */
+  onOpenScenario?: (lessonId: number) => void
 }
 
 type Phase = 'content' | 'exercises' | 'summary'
@@ -17,7 +19,7 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function LessonScreen({ lessonId, onBack, onCompleted }: LessonScreenProps): JSX.Element {
+export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: LessonScreenProps): JSX.Element {
   const [detail, setDetail] = useState<LessonDetail | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [phase, setPhase] = useState<Phase>('content')
@@ -153,6 +155,9 @@ export function LessonScreen({ lessonId, onBack, onCompleted }: LessonScreenProp
           <h1 className="truncate text-base font-semibold">{detail.lesson.title}</h1>
           <p className="truncate text-xs text-muted">
             {detail.lesson.unitTitle ? `${detail.lesson.unitTitle} · ` : ''}
+            {detail.lesson.trackTitle
+              ? `${t.player.trackBadge.replace('{title}', detail.lesson.trackTitle)} · `
+              : ''}
             {detail.lesson.level}
           </p>
         </div>
@@ -366,6 +371,15 @@ export function LessonScreen({ lessonId, onBack, onCompleted }: LessonScreenProp
               )}
 
               <div className="mt-6 flex items-center justify-center gap-2">
+                {detail.lesson.isScenario && onOpenScenario && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenScenario(detail.lesson.id)}
+                    className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                  >
+                    {t.player.scenarioCta}
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
@@ -380,11 +394,19 @@ export function LessonScreen({ lessonId, onBack, onCompleted }: LessonScreenProp
                 <button
                   type="button"
                   onClick={onCompleted}
-                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                    detail.lesson.isScenario
+                      ? 'border border-line text-muted hover:text-ink'
+                      : 'bg-accent text-accent-ink hover:bg-accent/90'
+                  }`}
                 >
                   {t.player.backHome}
                 </button>
               </div>
+
+              {detail.lesson.isScenario && (
+                <p className="mx-auto mt-3 max-w-md text-xs leading-relaxed text-faint">{t.player.scenarioBody}</p>
+              )}
             </section>
           )}
         </div>

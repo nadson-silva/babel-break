@@ -77,11 +77,13 @@ export function lessonContentPrompt(input: {
   level: CefrLevel
   goal: string
   errors: ErrorHint[]
+  /** Contexto de trilha de foco: domínio de vocabulário, não nova gramática. */
+  track?: { title: string; vocabulary: string[] } | null
 }): { system: string; user: string } {
   return {
     system: BASE_SYSTEM,
     user: [
-      `Prepare o conteúdo da lição "${input.title}" (${input.level}) da unidade "${input.unitTitle}".`,
+      `Prepare o conteúdo da lição "${input.title}" (${input.level}) da ${input.track ? `trilha "${input.track.title}"` : `unidade "${input.unitTitle}"`}.`,
       `Objetivo da lição: ${input.objective}. Objetivo do aluno: ${input.goal || 'conversação geral'}.`,
       'A explicação deve ter 2 a 4 parágrafos curtos em português, com exemplos em inglês no meio.',
       'examples: 3 a 5 pares inglês/português; inglês natural e no nível do aluno.',
@@ -91,6 +93,14 @@ export function lessonContentPrompt(input: {
       'Se algum erro do aluno couber nesta lição, inclua-o em pitfalls e mencione-o na explicação.',
       'Erros do aluno (prioridade, mais recorrentes primeiro):',
       focusSection(input.errors),
+      ...(input.track
+        ? [
+            `Domínio da trilha: ${input.track.title}.`,
+            `Palavras-alvo que DEVEM aparecer no vocabulary e nos exemplos: ${input.track.vocabulary.slice(0, 8).join(', ')}.`,
+            `Restrição de nível: ${input.level} — use gramática de ${input.level}, nenhuma estrutura além dela, mesmo que o domínio permita.`,
+            'Todo o conteúdo (explicação, exemplos, vocabulário) se passa em situações reais desse domínio.'
+          ]
+        : []),
       'Mantenha o inglês simples: no máximo 2 orações por frase de exemplo.'
     ].join('\n')
   }
@@ -101,6 +111,7 @@ export function exercisePrompt(input: {
   level: CefrLevel
   goal: string
   errors: ErrorHint[]
+  track?: { title: string; vocabulary: string[] } | null
 }): { system: string; user: string } {
   const vocabulary = input.content.vocabulary
     .slice(0, 6)
@@ -133,6 +144,13 @@ export function exercisePrompt(input: {
       `Tags disponíveis: ${focusTags || 'nenhuma ainda'}.`,
       'Erros do aluno (mais recorrentes primeiro):',
       focusSection(input.errors, 4),
+      ...(input.track
+        ? [
+            `Todos os exercícios passam por dentro do domínio "${input.track.title}": situações, frases e vocabulário desse contexto.`,
+            `Pelo menos 3 exercícios devem usar as palavras-alvo: ${input.track.vocabulary.slice(0, 8).join(', ')}.`,
+            `A gramática cobrada fica em ${input.level} — nada acima disso.`
+          ]
+        : []),
       'Não repita a mesma frase em exercícios diferentes.'
     ].join('\n')
   }
@@ -178,6 +196,14 @@ export interface TutorContext {
   summary: string | null
   lesson: { title: string; objective: string; grammar: string[] } | null
   topic: string | null
+  /** Modo cenário: o tutor entra em personagem e persegue os critérios da tarefa. */
+  scenario?: ScenarioContext | null
+}
+
+export interface ScenarioContext {
+  persona: string
+  setting: string
+  successCriteria: string[]
 }
 
 /**
@@ -212,10 +238,30 @@ export function tutorSystem(context: TutorContext): string {
       ? `A conversa vem da lição "${context.lesson.title}" (${context.lesson.objective}). Structures da lição para reaparecerem: ${context.lesson.grammar.join(', ') || '—'}.`
       : '',
     context.topic ? `Tema pedido pelo aluno: ${context.topic}.` : '',
+    scenarioSection(context.scenario ?? null),
     context.summary ? `Resumo da conversa até agora: ${context.summary}` : ''
   ]
     .filter(Boolean)
     .join('\n')
+}
+
+/**
+ * Bloco de personagem do modo cenário. A rubrica de conteúdo é separada da de
+ * língua: aqui o tutor só cuida da TAREFA, e a correção continua sendo calculada
+ * em outra passada.
+ */
+function scenarioSection(scenario: ScenarioContext | null): string {
+  if (!scenario) return ''
+
+  return [
+    'MODO CENÁRIO (roleplay): você está em personagem e não sai dele.',
+    `Personagem: ${scenario.persona}.`,
+    `Contexto: ${scenario.setting}.`,
+    'Fale sempre em inglês, dentro do personagem, e conduza a conversa até a tarefa ser cumprida.',
+    'No máximo uma pergunta por vez; se o aluno travar, dê uma opção de resposta dentro do personagem.',
+    'Critérios da tarefa (objetivo oculto — não liste nem cheque em voz alta):',
+    scenario.successCriteria.map((criterion) => `- ${criterion}`).join('\n')
+  ].join('\n')
 }
 
 export function correctionStyleLabel(style: CorrectionStyle): string {
@@ -226,6 +272,9 @@ export function correctionStyleLabel(style: CorrectionStyle): string {
 
 /** Primeira chamada da conversa: o tutor abre o papo. */
 export function tutorOpenerMessage(context: TutorContext): string {
+  if (context.scenario) {
+    return 'Você é o personagem do cenário. Abra o roleplay com a primeira fala, em inglês, uma frase.'
+  }
   if (context.topic) return `Comece a conversa sobre: ${context.topic}.`
   if (context.lesson) return `Comece uma conversa curta ligada à lição "${context.lesson.title}".`
   return 'Comece a conversa puxando um assunto ligado ao objetivo do aluno.'
@@ -271,3 +320,86 @@ export function summaryPrompt(input: { current: string | null; transcript: strin
     ].join('\n')
   }
 }
+
+// --- Trilhas de foco e cenário (M3) --------------------------------------------
+
+/** Esboço da trilha de foco: mini-currículo nivelado, orientado a cenários. */
+export function trackPlanPrompt(input: {
+  objective: string
+  level: CefrLevel
+  goal: string
+}): { system: string; user: string } {
+  return {
+    system: BASE_SYSTEM,
+    user: [
+      `Monte o esboço de uma trilha de foco para um aluno de inglês no nível ${input.level}.`,
+      `Tópico pedido pelo aluno: ${input.objective}.`,
+      `Objetivo geral do aluno: ${input.goal || 'conversação geral'}.`,
+      'A trilha é um mini-currículo: 5 a 8 lições em ordem de dificuldade, todas dentro do domínio pedido.',
+      `A progressão gramatical NÃO muda por causa da trilha: mantenha a complexidade no nível ${input.level}. O que muda é o domínio do vocabulário e as situações.`,
+      'Campos:',
+      '- title: nome curto da trilha (em português, ex.: "Entrevista para dev").',
+      '- goalTag: etiqueta curta em inglês, kebab-case (ex.: "dev-interview", "travel-basic").',
+      '- lessons: 5 a 8 lições, cada uma com title (curto, em português), objective (1 frase, em português) e',
+      '  focusVocabulary (5 a 10 termos em inglês do domínio, sem tradução).',
+      'A última lição da trilha deve ser um cenário de prática (roleplay) do objetivo final dela.',
+      'Não repita termos entre as lições; a primeira deve ser a mais acessível do domínio.'
+    ].join('\n')
+  }
+}
+
+/** Persona, ambientação e critérios de sucesso de um roleplay. */
+export function scenarioGenPrompt(input: {
+  lessonTitle: string
+  objective: string
+  level: CefrLevel
+  goal: string
+}): { system: string; user: string } {
+  return {
+    system: BASE_SYSTEM,
+    user: [
+      `Crie um cenário de roleplay para o aluno praticar a lição "${input.lessonTitle}" (${input.level}).`,
+      `Objetivo da lição: ${input.objective}. Objetivo geral do aluno: ${input.goal || 'conversação geral'}.`,
+      'Campos:',
+      '- persona: quem o tutor vai interpretar, em português (ex.: "entrevistador técnico de uma startup, objetivo e simpático").',
+      '- setting: onde e quando a conversa acontece, em português, 1 frase.',
+      '- successCriteria: 3 a 5 coisas concretas que o aluno precisa conseguir dizer/fazer para cumprir a tarefa, em português, frases curtas.',
+      `- openingLine: a primeira fala do personagem, em inglês, no nível ${input.level}, 1 a 2 frases.`,
+      'O personagem fala em inglês durante todo o roleplay. Os critérios avaliam a TAREFA (conteúdo), não a gramática.'
+    ].join('\n')
+  }
+}
+
+/** Feedback estruturado pós-roleplay: rubrica de conteúdo separada da de língua. */
+export function scenarioFeedbackPrompt(input: {
+  persona: string
+  setting: string
+  criteria: string[]
+  transcript: string
+  level: CefrLevel
+  errors: ErrorHint[]
+}): { system: string; user: string } {
+  return {
+    system: BASE_SYSTEM,
+    user: [
+      'Avalie o desempenho de um aluno brasileiro em um roleplay de inglês.',
+      `Nível do aluno: ${input.level}.`,
+      `Personagem: ${input.persona}. Contexto: ${input.setting}.`,
+      'Critérios de sucesso da tarefa (avalie um a um):',
+      input.criteria.map((criterion, index) => `${index + 1}. ${criterion}`).join('\n'),
+      'Transcrição da conversa:',
+      input.transcript,
+      'Campos:',
+      '- contentScore: fração dos critérios de TAREFA cumpridos (0 a 1). Ignore gramática aqui.',
+      '- criteriaMet: um booleano por critério, na mesma ordem da lista acima (true = o aluno cumpriu).',
+      '- languageScore: quão correta e adequada ao nível foi a língua (0 a 1).',
+      '- feedback: 2 a 4 frases em português. Diga o que cumpriu, o que faltou e o ponto a melhorar.',
+      '- bestPhrases: até 3 falas do aluno → versão em inglês mais natural/precisa, com reason em português.',
+      '- followUpDrill: 1 instrução curta em português para um exercício de follow-up sobre o ponto mais fraco.',
+      'Se a transcrição tiver poucos turnos do aluno, seja conservador nos scores.',
+      'Erros recorrentes do aluno (considere no languageScore):',
+      focusSection(input.errors, 5)
+    ].join('\n')
+  }
+}
+

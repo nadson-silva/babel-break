@@ -153,6 +153,58 @@ const SCHEMAS = {
       recast: { type: 'string' }
     },
     required: ['corrections']
+  },
+  track_plan: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      goalTag: { type: 'string' },
+      lessons: {
+        type: 'array',
+        minItems: 4,
+        maxItems: 8,
+        items: {
+          type: 'object',
+          properties: {
+            title: { type: 'string' },
+            objective: { type: 'string' },
+            focusVocabulary: { type: 'array', items: { type: 'string' } }
+          },
+          required: ['title', 'objective', 'focusVocabulary']
+        }
+      }
+    },
+    required: ['title', 'goalTag', 'lessons']
+  },
+  scenario_gen: {
+    type: 'object',
+    properties: {
+      persona: { type: 'string' },
+      setting: { type: 'string' },
+      successCriteria: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string' } },
+      openingLine: { type: 'string' }
+    },
+    required: ['persona', 'setting', 'successCriteria', 'openingLine']
+  },
+  scenario_feedback: {
+    type: 'object',
+    properties: {
+      contentScore: { type: 'number' },
+      languageScore: { type: 'number' },
+      feedback: { type: 'string' },
+      criteriaMet: { type: 'array', items: { type: 'boolean' } },
+      bestPhrases: {
+        type: 'array',
+        maxItems: 3,
+        items: {
+          type: 'object',
+          properties: { original: { type: 'string' }, improved: { type: 'string' }, reason: { type: 'string' } },
+          required: ['original', 'improved']
+        }
+      },
+      followUpDrill: { type: 'string' }
+    },
+    required: ['contentScore', 'languageScore', 'feedback']
   }
 }
 
@@ -188,6 +240,36 @@ const TASKS = [
     name: 'tutor_turn',
     schema: SCHEMAS.correction,
     user: 'Aluno escreveu: "Yesterday I go to work and I didn\'t took my laptop.". Corrija e devolva recast.'
+  },
+  {
+    name: 'track_plan',
+    schema: SCHEMAS.track_plan,
+    user: [
+      'Esboço de trilha de foco para aluno A2: "entrevista para desenvolvedor backend".',
+      '5 lições, cada uma com título, objetivo e 5 palavras-alvo do domínio (em inglês).',
+      'A gramática continua A2; o que muda é o vocabulário e a situação. Traga title, goalTag e lessons.'
+    ].join('\n')
+  },
+  {
+    name: 'scenario_gen',
+    schema: SCHEMAS.scenario_gen,
+    user: [
+      'Crie o roleplay de fechamento da lição "Pergunte sobre a vaga" (A2, entrevista para dev).',
+      'Traga persona (em português), setting (em português), successCriteria (3 a 4, em português) e',
+      'openingLine (a primeira fala do personagem, em inglês, nível A2).'
+    ].join('\n')
+  },
+  {
+    name: 'scenario_feedback',
+    schema: SCHEMAS.scenario_feedback,
+    user: [
+      'Roleplay: entrevistador x aluno A2. Critérios: apresentar trajetória; descrever um projeto com resultado;',
+      'fazer uma pergunta sobre a vaga.',
+      'Transcrição: aluno: "I have background in backend. I maintain two services." tutor: "Nice."',
+      'aluno: "My team ship a new api last month." tutor: "How was the launch?" aluno: "Very good."',
+      'Dê contentScore (0 a 1, só a tarefa), languageScore (0 a 1, só a língua, os erros são articles e',
+      'past-simple), criteriaMet (um booleano por critério), feedback em português e followUpDrill.'
+    ].join('\n')
   }
 ]
 
@@ -249,6 +331,28 @@ function looksUsable(name, parsed) {
   if (name === 'lesson_content')
     return typeof parsed.explanation === 'string' && Array.isArray(parsed.vocabulary) && parsed.vocabulary.length >= 4
   if (name === 'exercise_gen') return Array.isArray(parsed.exercises) && parsed.exercises.length >= 4
+  if (name === 'track_plan') {
+    if (typeof parsed.title !== 'string' || !Array.isArray(parsed.lessons)) return false
+    if (parsed.lessons.length < 4) return false
+    return parsed.lessons.every((lesson) => Array.isArray(lesson.focusVocabulary) && lesson.focusVocabulary.length > 0)
+  }
+  if (name === 'scenario_gen') {
+    return (
+      typeof parsed.persona === 'string' &&
+      Array.isArray(parsed.successCriteria) &&
+      parsed.successCriteria.length >= 2 &&
+      typeof parsed.openingLine === 'string'
+    )
+  }
+  if (name === 'scenario_feedback') {
+    const content = Number(parsed.contentScore)
+    const language = Number(parsed.languageScore)
+    if (!Number.isFinite(content) || !Number.isFinite(language)) return false
+    if (content < 0 || content > 1 || language < 0 || language > 1) return false
+    // o ponto do M3: tarefa e língua são medidas diferentes — um score copiado do
+    // outro significa que o modelo não separou as duas rubricas
+    return content !== language
+  }
   return Array.isArray(parsed.corrections)
 }
 

@@ -21,6 +21,8 @@ import type {
   ConversationView,
   Correction,
   RecapView,
+  ScenarioFeedbackView,
+  ScenarioView,
   SkillId,
   TutorMessage
 } from '../shared/types'
@@ -28,12 +30,21 @@ import { reestimateLevel } from '../core/adapt'
 import { bankCorrections, mergeCorrections, tagsOf } from '../core/correction'
 import { clampLevel } from '../core/cefr'
 import { recast as bankRecast } from '../core/interference'
-import { correctionPrompt, summaryPrompt, tutorOpenerMessage, tutorSystem, type ErrorHint, type TutorContext } from '../core/prompts'
+import {
+  correctionPrompt,
+  summaryPrompt,
+  tutorOpenerMessage,
+  tutorSystem,
+  type ErrorHint,
+  type ScenarioContext,
+  type TutorContext
+} from '../core/prompts'
 import { correctionSetSchema, conversationSummarySchema } from '../core/schemas'
 import { currentModel, generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
 import { errorHints, recordCorrections } from './notebook'
 import { cardsForErrorsFrom } from './review'
+import { trackContextOf } from './tracks'
 import { getProvider } from './providers'
 import { getSettings } from './settings'
 
@@ -92,6 +103,43 @@ function toSummary(row: ConversationRow): ConversationSummary {
     lastMessageAt: row.lastMessageAt || row.createdAt,
     messageCount: countMessages(row.id),
     closed: row.closedAt != null
+  }
+}
+
+export { toSummary }
+
+/** Cenário gravado na conversa, pronto para virar contexto do tutor. */
+function scenarioOf(row: ConversationRow): ScenarioContext | null {
+  const view = scenarioViewOf(row)
+  if (!view) return null
+
+  return { persona: view.persona, setting: view.setting, successCriteria: view.successCriteria }
+}
+
+/**
+ * Cenário completo da conversa (M3). É o que o renderer mostra como banner:
+ * personagem, contexto e critérios — e o que o tutor usa para entrar em
+ * personagem. Fica no banco, então reabrir a conversa não regasta nada.
+ */
+export function scenarioViewOf(row: ConversationRow): ScenarioView | null {
+  if (row.mode !== 'scenario' || !row.scenario) return null
+
+  const parsed = safeJson(row.scenario) as {
+    persona?: string
+    setting?: string
+    successCriteria?: string[]
+    openingLine?: string
+    source?: string
+  } | null
+
+  if (!parsed?.persona) return null
+
+  return {
+    persona: parsed.persona,
+    setting: parsed.setting ?? '',
+    successCriteria: Array.isArray(parsed.successCriteria) ? parsed.successCriteria : [],
+    openingLine: parsed.openingLine ?? '',
+    source: parsed.source === 'ai' ? 'ai' : 'fallback'
   }
 }
 
@@ -178,13 +226,24 @@ function safeJson(value: string): unknown {
   }
 }
 
+/**
+ * Vocabulário recente do aluno. Cobre as duas camadas de conteúdo: lições do
+ * currículo base (unidade) e lições de trilha — uma junção por unidade deixaria
+ * a trilha de fora, e é justamente ela que o cenário precisa reaparecer.
+ */
 function recentVocabulary(profileId: number): { term: string; translation: string }[] {
   const rows = getDb()
     .select({ payload: schema.lessonItems.payload })
     .from(schema.lessonItems)
     .innerJoin(schema.lessons, eq(schema.lessons.id, schema.lessonItems.lessonId))
-    .innerJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
-    .where(and(eq(schema.units.profileId, profileId), eq(schema.lessonItems.kind, 'vocab')))
+    .leftJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.focusTracks, eq(schema.focusTracks.id, schema.lessons.trackId))
+    .where(
+      and(
+        eq(schema.lessonItems.kind, 'vocab'),
+        sql`coalesce(${schema.units.profileId}, ${schema.focusTracks.profileId}) = ${profileId}`
+      )
+    )
     .orderBy(desc(schema.lessonItems.id))
     .limit(8)
     .all()
@@ -200,17 +259,43 @@ function recentVocabulary(profileId: number): { term: string; translation: strin
 function buildContext(profileId: number, conversation: ConversationRow): TutorContext {
   const profile = profileOf(profileId)
   const lesson = lessonContext(conversation.lessonId)
+  const scenario = scenarioOf(conversation)
+  const scenarioTerms = scenarioVocabulary(conversation.lessonId)
 
   return {
     level: clampLevel(profile.cefr),
     goal: profile.goal ?? '',
     style: getSettings().correctionStyle,
     errors: errorHints(profileId, 6),
-    vocabulary: lesson && lesson.vocabulary.length > 0 ? lesson.vocabulary : recentVocabulary(profileId),
+    vocabulary:
+      lesson && lesson.vocabulary.length > 0
+        ? lesson.vocabulary
+        : scenarioTerms.length > 0
+          ? scenarioTerms
+          : recentVocabulary(profileId),
     summary: conversation.summary,
     lesson: lesson ? { title: lesson.title, objective: lesson.objective, grammar: lesson.grammar } : null,
-    topic: conversation.topic
+    topic: conversation.topic,
+    scenario
   }
+}
+
+/** Vocabulário-alvo da trilha: o personagem deve usá-lo, e o aluno precisa dele. */
+function scenarioVocabulary(lessonId: number | null): { term: string; translation: string }[] {
+  if (lessonId == null) return []
+
+  const row = getDb()
+    .select()
+    .from(schema.lessons)
+    .where(eq(schema.lessons.id, lessonId))
+    .get()
+
+  if (!row) return []
+
+  const context = trackContextOf(row)
+  if (!context) return []
+
+  return context.vocabulary.slice(0, 8).map((term) => ({ term, translation: term }))
 }
 
 function streamReply(
@@ -278,7 +363,12 @@ export function openConversationView(profileId: number, conversationId: number):
   const row = conversationOf(profileId, conversationId)
   if (!row) throw new Error('Conversa não encontrada.')
 
-  return { conversation: toSummary(row), messages: messagesOf(conversationId).map(toMessage), summary: row.summary }
+  return {
+    conversation: toSummary(row),
+    messages: messagesOf(conversationId).map(toMessage),
+    summary: row.summary,
+    scenario: scenarioViewOf(row)
+  }
 }
 
 /** Última conversa aberta com conteúdo — o "continuar de onde parei" do chat. */
@@ -585,7 +675,7 @@ export function applyReestimation(profileId: number): { from: CefrLevel; to: Cef
 export function buildRecap(
   profileId: number,
   corrections: Correction[],
-  extra: { reviewDone?: number; practice?: { correct: number; total: number } } = {}
+  extra: { reviewDone?: number; practice?: { correct: number; total: number }; scenario?: ScenarioFeedbackView | null } = {}
 ): RecapView {
   const tags = tagsOf(corrections)
   const cardsCreated = cardsForErrorsFrom(
@@ -607,20 +697,25 @@ export function buildRecap(
     reviewDone: extra.reviewDone,
     practice: extra.practice,
     levelChange,
-    message: recapMessage(corrections, cardsCreated, levelChange)
+    scenario: extra.scenario ?? null,
+    message: recapMessage(corrections, cardsCreated, levelChange, extra.scenario ?? null)
   }
 }
 
 function recapMessage(
   corrections: Correction[],
   cardsCreated: number,
-  levelChange: { from: CefrLevel; to: CefrLevel } | null
+  levelChange: { from: CefrLevel; to: CefrLevel } | null,
+  scenario: ScenarioFeedbackView | null = null
 ): string {
   const tags = tagsOf(corrections)
   const parts = [
     corrections.length === 0
       ? 'Nenhuma correção de língua nesta sessão — você se saiu bem.'
       : `${corrections.length} correções${tags.length > 0 ? `, nas áreas ${tags.join(', ')}` : ''}.`,
+    scenario
+      ? `Cenário: tarefa ${Math.round(scenario.contentScore * 100)}% · língua ${Math.round(scenario.languageScore * 100)}%.`
+      : null,
     cardsCreated > 0 ? `${cardsCreated} card(s) novos na fila de revisão.` : null,
     levelChange ? `Seu nível foi reestimado de ${levelChange.from} para ${levelChange.to}.` : null
   ]

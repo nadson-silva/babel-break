@@ -5,12 +5,16 @@
  * das correções, novos cards e tags no caderno. O estado vive em
  * `study_sessions.summary`, então a sessão sobrevive a fechar o app no meio.
  */
-import { and, asc, desc, eq, isNull } from 'drizzle-orm'
-import type { Correction, GuidedSession, GuidedStep, RecapView } from '../shared/types'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
+import type { Correction, GuidedSession, GuidedStep, RecapView, ScenarioFeedbackView } from '../shared/types'
+import { pickRecommendationOrigin } from '../core/tracks'
 import { getDb, schema } from './db'
 import { openLesson } from './learning'
 import { dueCount } from './review'
+import { finishScenarioRun, startScenarioRun } from './scenario'
 import { buildRecap, closeConversation, createConversation } from './tutor'
+import { openTrackLessons } from './tracks'
+import { getSettings } from './settings'
 
 const STEPS: GuidedStep[] = ['review', 'lesson', 'practice', 'tutor', 'recap']
 
@@ -22,6 +26,8 @@ interface GuidedSummary {
   review: { dueCount: number; done: number }
   practice: { correct: number; total: number }
   recap: RecapView | null
+  /** Lição de trilha marcada para roleplay: o passo 4 vira cenário. */
+  isScenario?: boolean
 }
 
 type SessionRow = typeof schema.studySessions.$inferSelect
@@ -41,7 +47,8 @@ function readSummary(row: SessionRow): GuidedSummary {
         step: parsed.step,
         review: parsed.review ?? { dueCount: 0, done: 0 },
         practice: parsed.practice ?? { correct: 0, total: 0 },
-        recap: parsed.recap ?? null
+        recap: parsed.recap ?? null,
+        isScenario: parsed.isScenario ?? false
       }
     }
   } catch {
@@ -79,7 +86,8 @@ function toView(row: SessionRow, summary: GuidedSummary): GuidedSession {
     review: summary.review,
     practice: summary.practice,
     startedAt: row.startedAt,
-    recap: summary.recap
+    recap: summary.recap,
+    isScenario: summary.isScenario ?? false
   }
 }
 
@@ -102,27 +110,69 @@ export function activeGuidedSession(profileId: number): GuidedSession | null {
   return toView(row, readSummary(row))
 }
 
-/** Lição da sessão: a que está em andamento, senão a próxima não iniciada. */
-function pickLesson(profileId: number): { id: number; title: string } | null {
+/**
+ * Lição da sessão: a que está em andamento (base ou trilha); senão a próxima do
+ * lado decidido pelo `focusMix`. Lição de foco marcada para roleplay chega como
+ * cenário — o passo 4 da sessão vira roleplay com rubrica, não chat solto.
+ */
+function pickLesson(profileId: number): { id: number; title: string; isScenario: boolean } | null {
+  const inProgress = lessonInProgress(profileId)
+  if (inProgress) return inProgress
+
+  const base = nextBaseLesson(profileId)
+  const focus = openTrackLessons(profileId)
+
+  const origin = pickRecommendationOrigin({
+    focusMix: getSettings().focusMix,
+    history: recentOrigins(profileId),
+    hasBase: base != null,
+    hasFocus: focus.length > 0
+  })
+
+  if (origin === 'focus') {
+    const lesson = focus[0]
+    return { id: lesson.id, title: lesson.title, isScenario: lesson.isScenario }
+  }
+
+  if (base) return { ...base, isScenario: false }
+
+  const lesson = focus[0]
+  return lesson ? { id: lesson.id, title: lesson.title, isScenario: lesson.isScenario } : null
+}
+
+/** Lição em andamento do perfil, vindo da base ou de uma trilha. */
+function lessonInProgress(profileId: number): { id: number; title: string; isScenario: boolean } | null {
   const db = getDb()
 
-  const inProgress = db
-    .select({ id: schema.lessons.id, title: schema.lessons.title })
+  const row = db
+    .select({
+      id: schema.lessons.id,
+      title: schema.lessons.title,
+      trackId: schema.lessons.trackId,
+      scenario: schema.lessons.scenario
+    })
     .from(schema.lessonProgress)
     .innerJoin(schema.lessons, eq(schema.lessons.id, schema.lessonProgress.lessonId))
-    .innerJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.focusTracks, eq(schema.focusTracks.id, schema.lessons.trackId))
     .where(
       and(
         eq(schema.lessonProgress.profileId, profileId),
-        eq(schema.units.profileId, profileId),
-        eq(schema.lessonProgress.status, 'in_progress')
+        eq(schema.lessonProgress.status, 'in_progress'),
+        sql`coalesce(${schema.units.profileId}, ${schema.focusTracks.profileId}) = ${profileId}`
       )
     )
     .orderBy(desc(schema.lessonProgress.lastOpenedAt))
     .limit(1)
     .get()
 
-  if (inProgress) return inProgress
+  if (!row) return null
+  return { id: row.id, title: row.title, isScenario: row.trackId != null && Boolean(row.scenario) }
+}
+
+/** Próxima lição do currículo base: a não iniciada mais à frente; senão a primeira. */
+function nextBaseLesson(profileId: number): { id: number; title: string } | null {
+  const db = getDb()
 
   const next = db
     .select({ id: schema.lessons.id, title: schema.lessons.title })
@@ -149,6 +199,22 @@ function pickLesson(profileId: number): { id: number; title: string } | null {
       .limit(1)
       .get() ?? null
   )
+}
+
+/** O que o aluno abriu por último, por camada — alimenta o mix sem criar cota. */
+function recentOrigins(profileId: number): ('base' | 'focus')[] {
+  const db = getDb()
+
+  return db
+    .select({ trackId: schema.lessons.trackId })
+    .from(schema.lessonProgress)
+    .innerJoin(schema.lessons, eq(schema.lessons.id, schema.lessonProgress.lessonId))
+    .where(eq(schema.lessonProgress.profileId, profileId))
+    .orderBy(desc(schema.lessonProgress.lastOpenedAt))
+    .limit(6)
+    .all()
+    .reverse()
+    .map((row) => (row.trackId != null ? 'focus' : 'base'))
 }
 
 export async function startGuidedSession(profileId: number): Promise<GuidedSession> {
@@ -191,7 +257,8 @@ export async function startGuidedSession(profileId: number): Promise<GuidedSessi
     step: due > 0 ? 'review' : 'lesson',
     review: { dueCount: due, done: 0 },
     practice: { correct: 0, total: 0 },
-    recap: null
+    recap: null,
+    isScenario: lesson.isScenario
   })
 
   return toView(row, summary)
@@ -219,12 +286,27 @@ export function recordGuidedPractice(
   return toView(row, writeSummary(row, { ...summary, practice }))
 }
 
-/** Cria (ou reaproveita) a conversa do passo 4, ligada à lição da sessão. */
+/**
+ * Cria (ou reaproveita) a conversa do passo 4. Em lição de trilha marcada para
+ * roleplay, a conversa nasce em modo cenário — persona e critérios da tarefa.
+ */
 export async function ensureGuidedConversation(profileId: number): Promise<GuidedSession> {
   const row = requireActive(profileId)
   const summary = readSummary(row)
 
   if (summary.conversationId) return toView(row, { ...summary, step: 'tutor' })
+
+  if (summary.isScenario && summary.lessonId != null) {
+    const session = await startScenarioRun(profileId, { lessonId: summary.lessonId })
+    return toView(
+      row,
+      writeSummary(row, {
+        ...summary,
+        conversationId: session.conversation.id,
+        step: 'tutor'
+      })
+    )
+  }
 
   const conversation = await createConversation(profileId, {
     lessonId: summary.lessonId,
@@ -240,10 +322,21 @@ export interface GuidedFinishInput {
 }
 
 /** Passo 5: recapitulação de correções → cards + tags + reestimativa de nível. */
-export function finishGuidedSession(profileId: number, input: GuidedFinishInput): GuidedSession {
+export async function finishGuidedSession(profileId: number, input: GuidedFinishInput): Promise<GuidedSession> {
   const db = getDb()
   const row = requireActive(profileId)
   const summary = readSummary(row)
+
+  // Cenário: a rubrica do roleplay (conteúdo × língua) é produzida antes do
+  // fechamento e vai junto na recapitulação da sessão.
+  let scenario: ScenarioFeedbackView | null = null
+  if (summary.isScenario && summary.conversationId) {
+    try {
+      scenario = await finishScenarioRun(profileId, summary.conversationId)
+    } catch (error) {
+      console.warn('[guided] rubrica de cenário indisponível:', errorMessage(error))
+    }
+  }
 
   const corrections: Correction[] = summary.conversationId
     ? db
@@ -257,7 +350,7 @@ export function finishGuidedSession(profileId: number, input: GuidedFinishInput)
   const practice = input.practice ?? summary.practice
   const reviewDone = input.reviewDone ?? summary.review.done
 
-  const recap = buildRecap(profileId, corrections, { reviewDone, practice })
+  const recap = buildRecap(profileId, corrections, { reviewDone, practice, scenario })
 
   if (summary.conversationId) closeConversation(profileId, summary.conversationId)
 
@@ -279,7 +372,8 @@ export function finishGuidedSession(profileId: number, input: GuidedFinishInput)
     review: { ...summary.review, done: reviewDone },
     practice,
     startedAt: row.startedAt,
-    recap
+    recap,
+    isScenario: summary.isScenario ?? false
   }
 }
 

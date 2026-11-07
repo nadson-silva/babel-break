@@ -136,6 +136,8 @@ export function fallbackLessonContent(input: {
   objective: string
   level: CefrLevel
   errors?: ErrorFocusEntry[]
+  /** Vocabulário do domínio (trilha de foco) — substitui o conjunto genérico. */
+  vocabulary?: { term: string; translation: string; example: string }[]
 }): LessonContentOutput {
   const exampleSet = [
     { en: 'I study English every day.', pt: 'Eu estudo inglês todos os dias.' },
@@ -165,14 +167,17 @@ export function fallbackLessonContent(input: {
       }
     ],
     pitfalls: focus.length > 0 ? pitfallsFrom(focus) : pitfallsFrom(bankEntries().slice(0, 2).map(toBankFocus)),
-    vocabulary: [
-      { term: 'study', translation: 'estudar', example: 'I study English.' },
-      { term: 'work', translation: 'trabalhar', example: 'She works from home.' },
-      { term: 'every day', translation: 'todos os dias', example: 'I practice every day.' },
-      { term: 'sometimes', translation: 'às vezes', example: 'Sometimes I listen to podcasts.' },
-      { term: 'because', translation: 'porque', example: 'I study because I want to improve.' },
-      { term: 'together', translation: 'juntos', example: 'We practice together.' }
-    ]
+    vocabulary:
+      input.vocabulary && input.vocabulary.length > 0
+        ? input.vocabulary.slice(0, 10)
+        : [
+            { term: 'study', translation: 'estudar', example: 'I study English.' },
+            { term: 'work', translation: 'trabalhar', example: 'She works from home.' },
+            { term: 'every day', translation: 'todos os dias', example: 'I practice every day.' },
+            { term: 'sometimes', translation: 'às vezes', example: 'Sometimes I listen to podcasts.' },
+            { term: 'because', translation: 'porque', example: 'I study because I want to improve.' },
+            { term: 'together', translation: 'juntos', example: 'We practice together.' }
+          ]
   }
 }
 

@@ -6,6 +6,7 @@ import type {
   RecapView,
   ReviewRating,
   ReviewState,
+  ScenarioRunView,
   SettingsPayload
 } from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
@@ -17,6 +18,8 @@ interface TutorScreenProps {
   onOpenSettings: () => void
   /** Abre a conversa criada/continuada a partir de outra tela. */
   initialConversationId?: number | null
+  /** Abre direto um roleplay (CTA de cenário vindo das trilhas ou da home). */
+  initialScenario?: { lessonId?: number; topic?: string } | null
 }
 
 function messageOf(error: unknown): string {
@@ -34,31 +37,50 @@ function formatTime(timestamp: number): string {
 export function TutorScreen({
   settings,
   onOpenSettings,
-  initialConversationId
+  initialConversationId,
+  initialScenario
 }: TutorScreenProps): JSX.Element {
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [activeId, setActiveId] = useState<number | null>(initialConversationId ?? null)
   const [topic, setTopic] = useState('')
   const [creating, setCreating] = useState(false)
+  const [scenarioMode, setScenarioMode] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [due, setDue] = useState<ReviewState | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const [recap, setRecap] = useState<RecapView | null>(null)
+  const [runs, setRuns] = useState<ScenarioRunView[]>([])
   const started = useRef(false)
 
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
 
   const refresh = useCallback(async (): Promise<void> => {
-    const [list, review] = await Promise.all([window.api.tutor.list(), window.api.review.state(1)])
+    const [list, review, scenarioRuns] = await Promise.all([
+      window.api.tutor.list(),
+      window.api.review.state(1),
+      window.api.scenario.runs(5)
+    ])
     setConversations(list)
     setDue(review)
+    setRuns(scenarioRuns)
     if (list.length > 0) setActiveId((current) => current ?? list[0].id)
   }, [])
+
   useEffect(() => {
     if (started.current) return
     started.current = true
 
-    void refresh().catch((error: unknown) => setError(messageOf(error)))
+    void (async () => {
+      try {
+        if (initialScenario) {
+          const session = await window.api.scenario.open(initialScenario)
+          setActiveId(session.conversation.id)
+        }
+        await refresh()
+      } catch (loadError) {
+        setError(messageOf(loadError))
+      }
+    })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -71,9 +93,14 @@ export function TutorScreen({
     setCreating(true)
     setError(null)
     try {
-      const view = await window.api.tutor.create({ topic: topic.trim() || null })
+      if (scenarioMode && topic.trim()) {
+        const session = await window.api.scenario.open({ topic: topic.trim() })
+        setActiveId(session.conversation.id)
+      } else {
+        const view = await window.api.tutor.create({ topic: topic.trim() || null })
+        setActiveId(view.conversation.id)
+      }
       setTopic('')
-      setActiveId(view.conversation.id)
       await refresh()
     } catch (createError) {
       setError(messageOf(createError))
@@ -106,16 +133,30 @@ export function TutorScreen({
             <input
               value={topic}
               onChange={(event) => setTopic(event.target.value)}
-              placeholder={t.tutor.topicPlaceholder}
+              placeholder={scenarioMode ? t.tracks.createPlaceholder : t.tutor.topicPlaceholder}
               className="w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-xs text-ink outline-none placeholder:text-faint focus:border-accent/50"
             />
+            {scenarioMode && (
+              <p className="text-[11px] leading-relaxed text-faint">{t.tracks.quickHelp}</p>
+            )}
+            <button
+              type="button"
+              onClick={() => setScenarioMode((current) => !current)}
+              className={`w-full rounded-lg border px-3 py-1.5 text-[11px] transition-colors ${
+                scenarioMode
+                  ? 'border-accent/50 bg-accent-soft text-accent'
+                  : 'border-line text-muted hover:bg-panel-2 hover:text-ink'
+              }`}
+            >
+              {scenarioMode ? t.scenario.start : t.tracks.quickCta}
+            </button>
             <button
               type="button"
               onClick={() => void create()}
               disabled={creating}
               className="w-full rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90 disabled:opacity-50"
             >
-              {creating ? t.tutor.thinking : t.tutor.newConversation}
+              {creating ? t.tutor.thinking : scenarioMode ? t.scenario.start : t.tutor.newConversation}
             </button>
           </div>
         </div>
@@ -142,6 +183,11 @@ export function TutorScreen({
                     {conversation.topic ?? conversation.lessonTitle ?? t.tutor.title}
                   </div>
                   <div className="mt-0.5 flex items-center gap-2 text-[10px] text-faint">
+                    {conversation.mode === 'scenario' && (
+                      <span className="rounded-full bg-accent-soft px-1.5 py-0.5 font-medium text-accent">
+                        {t.scenario.badge}
+                      </span>
+                    )}
                     <span>{formatTime(conversation.lastMessageAt)}</span>
                     <span>· {conversation.messageCount}</span>
                     {conversation.closed && <span>· {t.tutor.ended}</span>}
@@ -149,6 +195,31 @@ export function TutorScreen({
                 </button>
               )
             })
+          )}
+
+          {runs.length > 0 && (
+            <div className="mt-3 border-t border-line-soft px-3 pt-3">
+              <div className="text-[10px] uppercase tracking-wider text-faint">{t.scenario.history}</div>
+              <div className="mt-2 space-y-1.5">
+                {runs.map((run) => (
+                  <button
+                    key={run.id}
+                    type="button"
+                    onClick={() => {
+                      setActiveId(run.conversationId)
+                      setRecap(null)
+                    }}
+                    className="w-full rounded-lg border border-line-soft bg-panel-2/50 px-2.5 py-2 text-left transition-colors hover:border-accent/40"
+                  >
+                    <div className="truncate text-[11px] font-medium">{run.lessonTitle ?? run.conversationId}</div>
+                    <div className="mt-0.5 text-[10px] text-faint">
+                      {t.scenario.taskScore} {Math.round((run.contentScore ?? 0) * 100)}% ·{' '}
+                      {t.scenario.languageScore} {Math.round((run.languageScore ?? 0) * 100)}%
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
           )}
         </div>
       </aside>
@@ -222,7 +293,16 @@ export function TutorScreen({
             </div>
           </div>
         ) : activeId ? (
-          <TutorPanel key={activeId} conversationId={activeId} onClosed={openedRecap} />
+          <TutorPanel
+            key={activeId}
+            conversationId={activeId}
+            onClosed={openedRecap}
+            onScenarioClosed={() => void refresh().catch(() => undefined)}
+            onScenarioReopened={(conversationId) => {
+              setActiveId(conversationId)
+              void refresh().catch(() => undefined)
+            }}
+          />
         ) : (
           <div className="flex flex-1 items-center justify-center px-8">
             <div className="max-w-md text-center">

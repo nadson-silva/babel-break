@@ -43,8 +43,23 @@ Sem sessão diária, streak ou meta obrigatória — você estuda quando quiser.
 - [x] Resumo rolante da conversa (janela de 12 mensagens + síntese por IA, com fallback local)
 - [x] Harness de avaliação manual (`scripts/eval.mjs`) e suíte de testes do domínio (`npm test`)
 
-Próximo: M3 — trilhas de foco (geração + aprovação de trilha, mix nas recomendações, modo
-cenário e feedback de cenário).
+**M3 concluído** — trilhas de foco e modo cenário:
+
+- [x] Trilha de foco a partir de um pedido livre ("entrevista para dev backend") ou de sugestão
+- [x] Esboço **revisável antes de virar lição**: renomear, remover, reordenar, regerar, descartar
+- [x] Nível da trilha = nível do aluno: a trilha muda domínio de vocabulário e situações, nunca a gramática
+- [x] Lições de trilha usam o mesmo motor de lição/exercício/SRS, restrito às palavras-alvo do domínio
+- [x] `focus_mix` decide a **ordem** do próximo passo (base × trilha), sem virar cota diária
+- [x] Modo cenário: persona, ambientação e critérios de sucesso gerados por IA (com banco local de
+      entrevista/trabalho/viagem/IELTS quando não há modelo)
+- [x] Rubrica de fechamento separa **tarefa cumprida** de **língua**: dois scores + checklist por critério
+- [x] 3 frases melhores do aluno viram cards SRS; o drill de follow-up volta na tela
+- [x] Sessão guiada: lição escolhida pelo mix e, em lição de foco, o passo 4 já abre em roleplay
+- [x] "Tenho entrevista amanhã": roleplay por tema livre, sem precisar criar trilha
+- [x] Trilha arquivada preserva o progresso; reativar devolve as lições como estavam
+
+Próximo: M4 — internacionalização (parametrização de prompts, escolha de idioma no onboarding,
+suporte a RTL/CJK, i18n da interface).
 
 ## Requisitos
 
@@ -91,6 +106,13 @@ GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash
 
 Com modelo local pequeno é esperado ver contratos falharem — é exatamente o caso em que
 o app degrada para o gerador determinístico (e o banco PT-BR continua corrigindo).
+
+Há também um smoke test dos contratos do M3 (trilha, cenário e rubrica) que só roda
+quando você pede, com um modelo de pé:
+
+```bash
+LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m3.smoke.test.ts
+```
 
 ## Ollama (local)
 
@@ -151,7 +173,9 @@ src/
     notebook.ts    caderno de erros (recorrência por tag, resolver, foco para prompts)
     review.ts      fila SRS: card por template, revisão FSRS, contadores
     guided.ts      sessão guiada de 5 etapas (estado persistido em study_sessions)
-    home.ts        agregado da home (aula, conversa, revisão, caderno)
+    tracks.ts      trilhas de foco: esboço → revisão → aprovação → lições da trilha
+    scenario.ts    modo cenário: persona do roleplay e rubrica de tarefa × língua
+    home.ts        agregado da home (aula, conversa, revisão, caderno, trilha e mix)
     ipc.ts         handlers de settings/provedor + registro dos módulos
     loop.ts        IPC do loop (tutor, notebook, review, guided)
     secrets.ts     safeStorage + fallback local
@@ -162,14 +186,15 @@ src/
     correction.ts     fusão banco+IA e política de correção
     adapt.ts          errorFocus (o que a próxima lição mira) e reestimativa de nível
     srs.ts            templates de card + wrapper do FSRS
-    prompts.ts        contratos de prompt (currículo, lição, exercício, tutor, correção)
+    prompts.ts        contratos de prompt (currículo, lição, exercício, tutor, correção, trilha, cenário)
     schemas.ts        schemas zod das saídas estruturadas
     grading.ts        correção local dos tipos objetivos
     fallback.ts       gerador determinístico de currículo, lição e exercícios
+    tracks.ts         trilha determinística, cadência de cenário e mix de recomendação
   preload/         bridge segura para o renderer
   renderer/        React + Tailwind (UI em PT-BR)
-    screens/       Home, Aulas, Lição, Tutor, Revisão, Caderno, Sessão guiada, Configurações
-    components/    ExercisePlayer, ReviewQueue, TutorPanel, CorrectionList, Sidebar
+    screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Sessão guiada, Configurações
+    components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, Sidebar
   shared/          tipos compartilhados entre main e renderer
 test/              stub do Electron para os testes de integração do processo main
 scripts/eval.mjs   harness manual de qualidade de IA
@@ -203,4 +228,42 @@ Detalhes que importam:
   PT-BR no conteúdo e cada exercício mostra as tags que treina.
 - **Fechamento**: encerrar uma conversa ou sessão gera recapitulação, novos cards e, se as
   habilidades indicarem, um novo nível estimado.
+
+## Como as trilhas funcionam (M3)
+
+Uma trilha é um **mini-currículo persistente**, não um ajuste de prompt:
+
+```
+objetivo livre ──► track_plan (IA, ou banco local de domínios) ──► esboço
+                                                                        │
+                                              o aluno revisa/remove/aprova
+                                                                        ▼
+                                            lessons + track_lessons (nível = nível do aluno)
+                                                                        │
+                             mesmo motor de lição/exercício/SRS do M2 ◄─┘
+                                                                        │
+                             a cada 3ª lição de foco e no fechamento: ◄─┘
+                                                                        ▼
+        scenario_gen (persona + critérios) ──► roleplay ──► scenario_feedback
+                                                        ├─ contentScore  (a tarefa foi cumprida?)
+                                                        └─ languageScore (a língua estava certa?)
+```
+
+Decisões que sustentam o "não é só um chatbot":
+
+- **Aprovação antes de gravar**: o esboço vive em `focus_tracks.plan` e só vira lição quando o
+  aluno aprova — regerar é barato e a trilha nunca fica incoerente com o resto.
+- **Nível manda, domínio muda**: uma trilha de entrevista para A2 fala de `stack`, `latency` e
+  `trade-off` com gramática de A2. Pré-requisito é aviso, nunca bloqueio.
+- **`focus_mix` é ordem, não cota**: a home compara o que foi *sugerido* recentemente com o peso
+  pedido e alterna base/trilha. Quem ignora a trilha não recebe cobrança; quem só quer a trilha
+  não recebe lição empurrada.
+- **Duas notas, não uma**: a rubrica do roleplay avalia tarefa e língua separadas. "Soa fluente,
+  não respondeu nada" tira nota alta em língua e baixa em tarefa — é o que torna o feedback útil.
+- **Sem IA, tudo continua**: `core/tracks.ts` traz trilha, cenário e rubrica determinísticos para
+  entrevista, trabalho, viagem e IELTS; a ficha da tarefa fica na UI mesmo no modo local.
+- **Cenário cacheado**: a persona nasce com a lição (seed) e é atualizada pela IA na primeira
+  abertura; reabrir não regasta tokens nem troca a tarefa no meio do caminho.
+- **Fechamento real**: as 3 melhores frases do aluno viram cards SRS, o drill de follow-up volta
+  na tela e `speaking` entra na reestimativa de nível junto com as outras habilidades.
 

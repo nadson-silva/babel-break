@@ -69,6 +69,24 @@ describe('contrato IPC', () => {
     }
   })
 
+  it('expõe as trilhas e o cenário do M3', () => {
+    for (const channel of [
+      'track:list',
+      'track:draft',
+      'track:revise',
+      'track:approve',
+      'track:discard',
+      'track:status',
+      'scenario:open',
+      'scenario:finish',
+      'scenario:session',
+      'scenario:runs',
+      'scenario:refresh'
+    ]) {
+      expect(registered.has(channel), channel).toBe(true)
+    }
+  })
+
   it('não deixou canal órfão sem chamada no preload', () => {
     const invoked = new Set(invokedChannels())
     const orphans = [...registered.keys()].filter(

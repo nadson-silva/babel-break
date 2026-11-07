@@ -8,8 +8,11 @@ interface HomeScreenProps {
   settings: SettingsPayload
   onOpenLesson: (lessonId: number) => void
   onOpenCatalog: () => void
+  onOpenTracks: () => void
   onOpenSettings: () => void
   onOpenTutor: (conversationId?: number) => void
+  /** Abre um roleplay direto (tema avulso ou lição de foco). */
+  onOpenScenario: (input: { lessonId?: number; topic?: string }) => void
   onOpenReview: () => void
   onOpenNotebook: () => void
   onStartGuided: (session: GuidedSession) => void
@@ -69,8 +72,10 @@ export function HomeScreen({
   settings,
   onOpenLesson,
   onOpenCatalog,
+  onOpenTracks,
   onOpenSettings,
   onOpenTutor,
+  onOpenScenario,
   onOpenReview,
   onOpenNotebook,
   onStartGuided,
@@ -260,24 +265,39 @@ export function HomeScreen({
                     </button>
                   </section>
                 ) : (
-                  data.nextLesson && (
+                  data.suggestion && (
                     <section className="rounded-2xl border border-line bg-panel p-5">
-                      <div className="text-[10px] uppercase tracking-wider text-faint">
-                        {t.home.nextTitle}
-                      </div>
-                      <h2 className="mt-2 text-base font-semibold">{data.nextLesson.title}</h2>
+                      <div className="text-[10px] uppercase tracking-wider text-faint">{t.home.nextTitle}</div>
+                      <h2 className="mt-2 text-base font-semibold">{data.suggestion.lesson.title}</h2>
                       <p className="mt-1 text-xs text-muted">
                         {t.home.nextBody
-                          .replace('{title}', data.nextLesson.title)
-                          .replace('{level}', data.nextLesson.level)}
+                          .replace('{title}', data.suggestion.lesson.title)
+                          .replace('{level}', data.suggestion.lesson.level)}{' '}
+                        · {data.suggestion.reason}
                       </p>
-                      <button
-                        type="button"
-                        onClick={() => onOpenLesson(data.nextLesson!.id)}
-                        className="mt-4 rounded-lg border border-line px-4 py-2 text-xs font-medium text-ink transition-colors hover:border-accent/50 hover:text-accent"
-                      >
-                        {t.home.nextCta}
-                      </button>
+                      {data.suggestion.origin === 'focus' && (
+                        <span className="mt-2 inline-block rounded-full bg-accent-soft px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-accent">
+                          {t.home.nextFromTrack}
+                        </span>
+                      )}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => onOpenLesson(data.suggestion!.lesson.id)}
+                          className="rounded-lg border border-line px-4 py-2 text-xs font-medium text-ink transition-colors hover:border-accent/50 hover:text-accent"
+                        >
+                          {data.suggestion.lesson.isScenario ? t.tracks.scenarioCta : t.home.nextCta}
+                        </button>
+                        {data.suggestion.lesson.isScenario && (
+                          <button
+                            type="button"
+                            onClick={() => onOpenScenario({ lessonId: data.suggestion!.lesson.id })}
+                            className="rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                          >
+                            {t.scenario.start}
+                          </button>
+                        )}
+                      </div>
                     </section>
                   )
                 )}
@@ -321,6 +341,24 @@ export function HomeScreen({
                     body={t.home.entryChatBody}
                     cta={t.home.continueChatCta}
                     onClick={() => onOpenTutor()}
+                  />
+                  <EntryCard
+                    title={t.home.entryTracks}
+                    body={
+                      (data.tracks.length ?? 0) > 0
+                        ? t.home.entryTracksBody
+                            .replace('{count}', String(data.tracks.length))
+                            .replace('{next}', data.tracks[0]?.nextLesson?.title ?? '—')
+                        : t.home.entryTracksBodyEmpty
+                    }
+                    cta={t.nav.tracks}
+                    onClick={onOpenTracks}
+                  />
+                  <EntryCard
+                    title={t.home.entryScenario}
+                    body={t.home.entryScenarioBody}
+                    cta={t.scenario.start}
+                    onClick={() => onOpenScenario({ topic: data.profile.goal ?? 'daily standup' })}
                   />
                   <EntryCard
                     accent
@@ -389,6 +427,72 @@ export function HomeScreen({
                       </button>
                     ))}
                   </div>
+                </section>
+              )}
+
+              {data.tracks.length === 0 && (
+                <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-line bg-panel p-5">
+                  <div className="min-w-0">
+                    <h2 className="text-sm font-semibold">{t.tracks.createTitle}</h2>
+                    <p className="mt-1 text-xs leading-relaxed text-muted">
+                      {data.profile.goal
+                        ? `${t.tracks.emptyBody} (${data.profile.goal})`
+                        : t.tracks.emptyBody}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenTracks}
+                    className="shrink-0 rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                  >
+                    {t.tracks.createCta}
+                  </button>
+                </section>
+              )}
+
+              {data.tracks.length > 0 && (
+                <section className="space-y-3">
+                  {data.tracks.map((track) => (
+                    <div key={track.id} className="rounded-2xl border border-line bg-panel p-5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-sm font-semibold">{track.title}</h2>
+                          <p className="mt-0.5 text-xs text-faint">
+                            {t.tracks.progress
+                              .replace('{done}', String(track.completedCount))
+                              .replace('{total}', String(track.totalCount))}{' '}
+                            · {track.levelRange ?? track.lessons[0]?.level ?? '—'}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={onOpenTracks}
+                          className="shrink-0 rounded-lg border border-line px-3 py-1.5 text-[11px] text-muted transition-colors hover:border-accent/50 hover:text-accent"
+                        >
+                          {t.tracks.openTrack}
+                        </button>
+                      </div>
+
+                      <div className="mt-3 divide-y divide-line-soft">
+                        {track.lessons.slice(0, 3).map((lesson) => (
+                          <button
+                            key={lesson.id}
+                            type="button"
+                            onClick={() => onOpenLesson(lesson.id)}
+                            className="flex w-full items-center gap-3 py-2.5 text-left transition-colors hover:text-accent"
+                          >
+                            <span className={`size-1.5 shrink-0 rounded-full ${statusColor(lesson)}`} />
+                            <span className="min-w-0 flex-1 truncate text-sm">{lesson.title}</span>
+                            {lesson.isScenario && (
+                              <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-[10px] uppercase tracking-wider text-accent">
+                                {t.scenario.badge}
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                 </section>
               )}
 

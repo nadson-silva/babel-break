@@ -2,7 +2,7 @@ import type { JSX } from 'react'
 import type { SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
 
-export type View = 'home' | 'lessons' | 'tutor' | 'review' | 'notebook' | 'settings'
+export type View = 'home' | 'lessons' | 'tracks' | 'tutor' | 'review' | 'notebook' | 'settings'
 
 interface SidebarProps {
   view: View
@@ -130,6 +130,21 @@ function ReviewIcon(): JSX.Element {
   )
 }
 
+function TrackIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <circle cx="6" cy="6" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <circle cx="18" cy="18" r="2.2" stroke="currentColor" strokeWidth="1.6" />
+      <path
+        d="M8.2 6H14a3 3 0 0 1 0 6h-4a3 3 0 0 0 0 6h5.8"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarProps): JSX.Element {
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
   const providerLabel = settings.provider === 'gemini' ? t.provider.gemini : t.provider.ollama
@@ -162,6 +177,12 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarPro
           onClick={() => onNavigate('lessons')}
           icon={<LessonsIcon />}
           label={t.nav.lessons}
+        />
+        <NavButton
+          active={view === 'tracks'}
+          onClick={() => onNavigate('tracks')}
+          icon={<TrackIcon />}
+          label={t.nav.tracks}
         />
         <NavButton
           active={view === 'tutor'}

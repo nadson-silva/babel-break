@@ -142,3 +142,51 @@ export type ExerciseSetOutput = z.infer<typeof exerciseSetSchema>
 export type GradeOutput = z.infer<typeof gradeSchema>
 export type CorrectionSetOutput = z.infer<typeof correctionSetSchema>
 export type ConversationSummaryOutput = z.infer<typeof conversationSummarySchema>
+
+export const trackPlanSchema = z.object({
+  title: z.string().min(2),
+  goalTag: z.string().min(2),
+  lessons: z.array(
+    z.object({
+      title: z.string().min(2),
+      objective: z.string().min(2),
+      focusVocabulary: z.array(z.string()).min(1).max(10)
+    })
+  ).min(5).max(8)
+})
+
+export const scenarioSchema = z.object({
+  persona: z.string().min(3),
+  setting: z.string().min(3),
+  successCriteria: z.array(z.string().min(3)).min(2).max(5),
+  openingLine: z.string().min(3)
+})
+
+/**
+ * Rubrica do roleplay: conteúdo e língua em scores separados. `criteriaMet` é o
+ * checklist dos critérios de sucesso, na mesma ordem recebida no prompt — é o
+ * que impede "soa fluente, não respondeu nada" de tirar nota boa.
+ */
+export const scenarioFeedbackSchema = z.object({
+  contentScore: z.number().min(0).max(1),
+  languageScore: z.number().min(0).max(1),
+  feedback: z.string().min(10),
+  criteriaMet: z.array(z.boolean()).max(5).default([]),
+  bestPhrases: z
+    .array(
+      z.object({
+        original: z.string().min(1),
+        improved: z.string().min(1),
+        reason: z.string().default('')
+      })
+    )
+    .max(3)
+    .default([]),
+  followUpDrill: z.string().default('')
+})
+
+export type TrackPlanOutput = z.infer<typeof trackPlanSchema>
+export type ScenarioOutput = z.infer<typeof scenarioSchema>
+export type ScenarioFeedbackOutput = z.infer<typeof scenarioFeedbackSchema>
+export type ScenarioPhrase = z.infer<typeof scenarioFeedbackSchema>['bestPhrases'][number]
+

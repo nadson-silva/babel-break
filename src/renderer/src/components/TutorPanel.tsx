@@ -1,12 +1,24 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX, KeyboardEvent } from 'react'
-import type { ChatEvent, ConversationView, Correction, RecapView } from '../../../shared/types'
+import type {
+  ChatEvent,
+  ConversationView,
+  Correction,
+  RecapView,
+  ScenarioFeedbackView,
+  ScenarioView
+} from '../../../shared/types'
 import { t } from '../i18n/pt-BR'
 import { CorrectionList } from './CorrectionList'
+import { ScenarioBanner, ScenarioFeedbackPanel } from './ScenarioPanel'
 
 interface TutorPanelProps {
   conversationId: number
   onClosed?: (recap: RecapView) => void
+  /** Aviso de que o cenário foi encerrado (a rubrica já aparece aqui dentro). */
+  onScenarioClosed?: () => void
+  /** O aluno reencenou a lição: a conversa nova precisa ser selecionada lá fora. */
+  onScenarioReopened?: (conversationId: number) => void
   /** Altura cheia (tela do tutor) ou compacta (dentro da sessão guiada). */
   variant?: 'full' | 'compact'
 }
@@ -36,14 +48,24 @@ function fromView(view: ConversationView): UiMessage[] {
   }))
 }
 
-export function TutorPanel({ conversationId, onClosed, variant = 'full' }: TutorPanelProps): JSX.Element {
+export function TutorPanel({
+  conversationId,
+  onClosed,
+  onScenarioClosed,
+  onScenarioReopened,
+  variant = 'full'
+}: TutorPanelProps): JSX.Element {
   const [messages, setMessages] = useState<UiMessage[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [recap, setRecap] = useState<RecapView | null>(null)
+  const [scenario, setScenario] = useState<ScenarioView | null>(null)
+  const [scenarioRun, setScenarioRun] = useState<ScenarioFeedbackView | null>(null)
+  const [scenarioLessonId, setScenarioLessonId] = useState<number | null>(null)
   const [closing, setClosing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const busy = streaming !== null
@@ -53,11 +75,25 @@ export function TutorPanel({ conversationId, onClosed, variant = 'full' }: Tutor
     setLoadError(null)
     setRecap(null)
     setMessages([])
+    setScenario(null)
+    setScenarioRun(null)
 
     window.api.tutor
       .open(conversationId)
       .then((view) => {
-        if (alive) setMessages(fromView(view))
+        if (!alive) return
+        setMessages(fromView(view))
+        setScenario(view.scenario)
+        setScenarioLessonId(view.conversation.lessonId)
+        if (view.scenario) {
+          // Rubrica de um cenário já encerrado volta junto da conversa.
+          void window.api.scenario
+            .session(conversationId)
+            .then((session) => {
+              if (alive && session?.run) setScenarioRun(session.run)
+            })
+            .catch(() => undefined)
+        }
       })
       .catch((error: unknown) => {
         if (alive) setLoadError(error instanceof Error ? error.message : String(error))
@@ -168,16 +204,41 @@ export function TutorPanel({ conversationId, onClosed, variant = 'full' }: Tutor
     )
   }
 
+  /**
+   * Fechar um cenário produz a rubrica (tarefa × língua) e encerra a conversa no
+   * main; fechar conversa livre produz só a recapitulação de correções.
+   */
   async function close(): Promise<void> {
     setClosing(true)
     try {
-      const result = await window.api.tutor.close(conversationId)
-      setRecap(result)
-      onClosed?.(result)
+      if (scenario) {
+        setScenarioRun(await window.api.scenario.finish(conversationId))
+        onScenarioClosed?.()
+      } else {
+        const result = await window.api.tutor.close(conversationId)
+        setRecap(result)
+        onClosed?.(result)
+      }
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : String(error))
     } finally {
       setClosing(false)
+    }
+  }
+
+  /** Reencena a mesma lição: outro personagem, mesma tarefa de nível. */
+  async function newPersona(): Promise<void> {
+    if (scenarioLessonId == null) return
+    setRefreshing(true)
+    setLoadError(null)
+    try {
+      await window.api.scenario.refresh(scenarioLessonId)
+      const session = await window.api.scenario.open({ lessonId: scenarioLessonId })
+      onScenarioReopened?.(session.conversation.id)
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setRefreshing(false)
     }
   }
 
@@ -197,6 +258,22 @@ export function TutorPanel({ conversationId, onClosed, variant = 'full' }: Tutor
       )}
 
       <div className={`flex-1 overflow-y-auto px-6 ${variant === 'full' ? 'py-6' : 'py-4'}`}>
+        {scenario && (
+          <div className="mx-auto mb-4 max-w-3xl">
+            <ScenarioBanner scenario={scenario} />
+            {scenario.source === 'ai' && !scenarioRun && scenarioLessonId != null && (
+              <button
+                type="button"
+                onClick={() => void newPersona()}
+                disabled={refreshing || busy}
+                className="mt-2 rounded-lg border border-line px-3 py-1.5 text-[11px] text-muted transition-colors hover:border-accent/50 hover:text-accent disabled:opacity-50"
+              >
+                {refreshing ? t.tutor.thinking : t.scenario.newPersona}
+              </button>
+            )}
+          </div>
+        )}
+
         {messages.length === 0 ? (
           <div className="mx-auto flex h-full max-w-xl flex-col items-center justify-center text-center">
             <h2 className="text-base font-semibold">{t.tutor.emptyTitle}</h2>
@@ -258,6 +335,14 @@ export function TutorPanel({ conversationId, onClosed, variant = 'full' }: Tutor
         )}
       </div>
 
+      {scenarioRun && (
+        <div className="border-t border-line bg-panel px-6 py-4">
+          <div className="mx-auto max-w-3xl">
+            <ScenarioFeedbackPanel run={scenarioRun} />
+          </div>
+        </div>
+      )}
+
       {recap && (
         <div className="border-t border-line bg-panel px-6 py-4">
           <div className="mx-auto max-w-3xl">
@@ -301,14 +386,14 @@ export function TutorPanel({ conversationId, onClosed, variant = 'full' }: Tutor
                 {t.tutor.send}
               </button>
             )}
-            {!recap && (
+            {!recap && !scenarioRun && (
               <button
                 type="button"
                 onClick={() => void close()}
-                disabled={closing || messages.length === 0}
+                disabled={closing || messages.length <= (scenario ? 1 : 0)}
                 className="h-[25px] rounded-lg border border-line px-4 text-xs text-muted transition-colors hover:text-ink disabled:opacity-40"
               >
-                {closing ? t.common.saving : t.tutor.endConversation}
+                {closing ? (scenario ? t.scenario.ending : t.common.saving) : scenario ? t.scenario.end : t.tutor.endConversation}
               </button>
             )}
           </div>

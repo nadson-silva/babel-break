@@ -1,30 +1,90 @@
 /**
- * Home do M2: junta currículo, caderno de erros, fila SRS, conversa e sessão
- * guiada num único payload. Nada aqui é obrigatório — vencidos e sugestões são
- * oferecidos, nunca cobrados.
+ * Home do M3: currículo, caderno de erros, fila SRS, conversa, sessão guiada e
+ * **trilhas de foco** num único payload. Nada aqui é obrigatório — vencidos,
+ * trilhas e sugestões são oferecidos, nunca cobrados.
+ *
+ * O `focusMix` aparece aqui e só aqui: ele decide a **ordem** da sugestão ("lição
+ * base ou lição da trilha?"), não uma cota diária. Quem só quer conversar não
+ * recebe lição nenhuma.
  */
 import { ipcMain } from 'electron'
-import type { HomeState } from '../shared/types'
-import { getDefaultProfile } from './db'
+import { desc, eq } from 'drizzle-orm'
+import type { HomeState, LessonSummary, NextSuggestion } from '../shared/types'
+import { pickRecommendationOrigin } from '../core/tracks'
+import { getDb, getDefaultProfile, schema } from './db'
 import { focusFor } from './notebook'
-import { curriculumView, lastOpenedLesson, profileView } from './learning'
+import { curriculumView, lastOpenedLesson, pendingLessons, profileView } from './learning'
 import { reviewState } from './review'
 import { activeGuidedSession } from './guided'
+import { tracksView } from './tracks'
 import { latestConversation } from './tutor'
+
+/** O que o aluno abriu por último, entre base e trilha — histórico do mix. */
+function recentOrigins(profileId: number): ('base' | 'focus')[] {
+  const db = getDb()
+
+  return db
+    .select({ lessonId: schema.lessonProgress.lessonId })
+    .from(schema.lessonProgress)
+    .where(eq(schema.lessonProgress.profileId, profileId))
+    .orderBy(desc(schema.lessonProgress.lastOpenedAt))
+    .limit(6)
+    .all()
+    .map((row) => {
+      const lesson = db
+        .select({ trackId: schema.lessons.trackId })
+        .from(schema.lessons)
+        .where(eq(schema.lessons.id, row.lessonId))
+        .get()
+
+      return lesson?.trackId != null ? 'focus' : 'base'
+    })
+    .reverse()
+}
+
+function suggestionFor(
+  base: LessonSummary[],
+  focus: LessonSummary[],
+  focusMix: number,
+  history: ('base' | 'focus')[]
+): NextSuggestion | null {
+  const origin = pickRecommendationOrigin({
+    focusMix,
+    history,
+    hasBase: base.length > 0,
+    hasFocus: focus.length > 0
+  })
+
+  if (!origin) return null
+
+  const lesson = origin === 'focus' ? focus[0] : base[0]
+  if (!lesson) return null
+
+  const reason =
+    origin === 'focus'
+      ? `da sua trilha “${lesson.trackTitle ?? 'foco'}”`
+      : lesson.unitTitle
+        ? `do currículo base · ${lesson.unitTitle}`
+        : 'do currículo base'
+
+  return { lesson, origin, reason }
+}
 
 export function homeState(): HomeState {
   const profile = getDefaultProfile()
   const curriculum = curriculumView()
   const lessons = curriculum.units.flatMap((unit) => unit.lessons)
+  const pending = pendingLessons(profile.id)
 
   const cards = reviewState(profile.id, 1)
   const focus = focusFor(profile.id, 4)
+  const tracks = tracksView(profile.id)
 
   return {
     profile: profileView(profile),
     curriculumReady: curriculum.generated,
     continueLesson: lastOpenedLesson(profile.id),
-    nextLesson: lessons.find((lesson) => lesson.status === 'not_started') ?? null,
+    nextLesson: pending.base[0] ?? null,
     units: curriculum.units,
     completedCount: lessons.filter((lesson) => lesson.status === 'completed').length,
     totalCount: lessons.length,
@@ -36,7 +96,9 @@ export function homeState(): HomeState {
         .map((entry) => ({ tag: entry.tag, occurrences: entry.occurrences }))
     },
     continueConversation: latestConversation(profile.id),
-    guided: activeGuidedSession(profile.id)
+    guided: activeGuidedSession(profile.id),
+    tracks: tracks.active,
+    suggestion: suggestionFor(pending.base, pending.focus, tracks.focusMix, recentOrigins(profile.id))
   }
 }
 

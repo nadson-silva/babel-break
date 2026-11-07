@@ -225,8 +225,8 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M0 — shell** (1–2 d) | scaffold electron-vite, SQLite + migrações, configurações com provedor + chave + teste de conectividade, chat de teste em streaming | dá para conversar com Gemini **e** Ollama pelo app | ✅ concluído |
 | **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim | ✅ concluído |
 | **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência | ✅ concluído |
-| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ⏭ próximo |
-| **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | — |
+| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ✅ concluído |
+| **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ⏭ próximo |
 | **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | — |
 | **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
 
@@ -236,6 +236,17 @@ determinística offline), `core/srs.ts` + `ts-fsrs` (cards por template e agenda
 (correções inline + janela rolante com resumo), `main/guided.ts` (sessão guiada de 5 etapas),
 telas Tutor/Revisão/Caderno/Sessão guiada, suíte de testes em `src/**/*.test.ts` e o harness
 `scripts/eval.mjs`.
+
+Notas do que ficou pronto no M3: `core/tracks.ts` (bancos de domínio escritos à mão para entrevista,
+trabalho, viagem e IELTS — trilha, cenário e rubrica determinísticas), `main/tracks.ts` (esboço
+revisável em `focus_tracks.plan`, aprovação materializa as lições no nível atual do aluno, arquivar
+preserva progresso), `main/scenario.ts` (persona cacheada em `lessons.scenario`, roleplay por lição ou
+por tema livre, rubrica com `contentScore`/`languageScore`/`criteriaMet` separados em `scenario_runs`),
+lição de trilha restrita às palavras-alvo do domínio nos prompts de `lesson_content` e `exercise_gen`,
+`focus_mix` ordenando o próximo passo da home (ordem, não cota), passo 4 da sessão guiada abrindo em
+cenário quando a lição de foco pede roleplay, e tela **Trilhas** com revisão do esboço antes de
+comprometer. Testes: `src/core/tracks.test.ts` e `src/main/tracks.integration.test.ts`; smoke test com
+IA real em `src/main/m3.smoke.test.ts` (roda com `LT_SMOKE=1`).
 
 A base vem antes das trilhas de propósito: trilhas reutilizam a mesma máquina de lição/exercício/SRS;
 construí-las primeiro significaria construir tudo duas vezes.

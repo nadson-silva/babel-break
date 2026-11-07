@@ -11,6 +11,7 @@ import { NotebookScreen } from './screens/NotebookScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
+import { TracksScreen } from './screens/TracksScreen'
 import { TutorScreen } from './screens/TutorScreen'
 
 function Splash({ error }: { error: string | null }): JSX.Element {
@@ -38,6 +39,7 @@ export default function App(): JSX.Element {
   const [activeLessonId, setActiveLessonId] = useState<number | null>(null)
   const [guided, setGuided] = useState<GuidedSession | null>(null)
   const [tutorConversation, setTutorConversation] = useState<number | null>(null)
+  const [scenarioRequest, setScenarioRequest] = useState<{ lessonId?: number; topic?: string } | null>(null)
   const [dueCount, setDueCount] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -82,6 +84,7 @@ export default function App(): JSX.Element {
   function navigate(next: View): void {
     setActiveLessonId(null)
     setGuided(null)
+    setScenarioRequest(null)
     setView(next)
   }
 
@@ -106,7 +109,17 @@ export default function App(): JSX.Element {
   function openTutor(conversationId?: number): void {
     setActiveLessonId(null)
     setGuided(null)
+    setScenarioRequest(null)
     setTutorConversation(conversationId ?? null)
+    setView('tutor')
+  }
+
+  /** Abre a tela do tutor já em modo cenário (lição de foco ou tema avulso). */
+  function openScenario(input: { lessonId?: number; topic?: string }): void {
+    setActiveLessonId(null)
+    setGuided(null)
+    setTutorConversation(null)
+    setScenarioRequest(input)
     setView('tutor')
   }
 
@@ -142,6 +155,7 @@ export default function App(): JSX.Element {
               refreshBadges()
             }}
             onCompleted={completeLesson}
+            onOpenScenario={(lessonId) => openScenario({ lessonId })}
           />
         ) : view === 'home' ? (
           <HomeScreen
@@ -149,8 +163,10 @@ export default function App(): JSX.Element {
             settings={settings}
             onOpenLesson={openLesson}
             onOpenCatalog={() => navigate('lessons')}
+            onOpenTracks={() => navigate('tracks')}
             onOpenSettings={() => navigate('settings')}
             onOpenTutor={openTutor}
+            onOpenScenario={openScenario}
             onOpenReview={() => navigate('review')}
             onOpenNotebook={() => navigate('notebook')}
             onStartGuided={startGuided}
@@ -163,12 +179,22 @@ export default function App(): JSX.Element {
             onOpenLesson={openLesson}
             onOpenSettings={() => navigate('settings')}
           />
+        ) : view === 'tracks' ? (
+          <TracksScreen
+            key={`tracks-${refreshKey}`}
+            settings={settings}
+            initialObjective={profileState.profile.goal}
+            onOpenLesson={openLesson}
+            onOpenScenario={(lessonId) => openScenario({ lessonId })}
+            onOpenSettings={() => navigate('settings')}
+          />
         ) : view === 'tutor' ? (
           <TutorScreen
-            key={`tutor-${refreshKey}-${tutorConversation ?? 'new'}`}
+            key={`tutor-${refreshKey}-${tutorConversation ?? 'new'}-${scenarioRequest ? 'scenario' : ''}`}
             settings={settings}
             onOpenSettings={() => navigate('settings')}
             initialConversationId={tutorConversation}
+            initialScenario={scenarioRequest}
           />
         ) : view === 'review' ? (
           <ReviewScreen key={`review-${refreshKey}`} onChanged={refreshBadges} />

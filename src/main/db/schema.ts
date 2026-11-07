@@ -186,10 +186,15 @@ export const focusTracks = sqliteTable('focus_tracks', {
   profileId: integer('profile_id').notNull(),
   title: text('title').notNull(),
   goalTag: text('goal_tag'),
+  /** Objetivo livre digitado pelo aluno ("entrevista para dev backend"). */
+  objective: text('objective'),
   levelRange: text('level_range'),
+  /** Esboço aprovado: fonte da verdade das lições da trilha (JSON de TrackPlanOutput). */
+  plan: text('plan'),
   status: text('status').notNull().default('draft'),
   source: text('source').notNull().default('user'),
-  createdAt: integer('created_at').notNull()
+  createdAt: integer('created_at').notNull(),
+  approvedAt: integer('approved_at')
 })
 
 export const trackLessons = sqliteTable(
