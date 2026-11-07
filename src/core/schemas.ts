@@ -1,27 +1,43 @@
 import { z } from 'zod'
 
+/**
+ * M6 (D1): versão do contrato de prompt e do schema de conteúdo GRAVADO.
+ * Todo `lessons.content` e todo `exercises.payload` sai carimbado com estes
+ * números. Conteúdo em cache com versão divergente conta como **stale** e vai
+ * pela fila de aquecimento (regeneração) — nunca por shim à mão. Export/import
+ * (v2) lê o carimbo antes de importar.
+ */
+export const PROMPT_VERSION = 1
+export const SCHEMA_VERSION = 1
+
 export const cefrSchema = z.enum(['A1', 'A2', 'B1', 'B2', 'C1'])
+
+/** M6 (D3/D4): tetos por string — o contrato do prompt fecha o tamanho, não o bom senso. */
+const short = z.string().min(2).max(200)
+const mid = z.string().min(1).max(600)
+const long = z.string().min(1).max(4_000)
 
 export const placementQuestionSchema = z.object({
   level: cefrSchema,
-  prompt: z.string().min(3),
-  options: z.array(z.string().min(1)).length(4),
+  prompt: mid,
+  options: z.array(mid).length(4),
   answerIndex: z.number().int().min(0).max(3),
-  explanation: z.string().min(1)
+  explanation: long
 })
 
+/** Teste de nível são exatamente 10 questões — o plano fecha essa conta. */
 export const placementSchema = z.object({
-  questions: z.array(placementQuestionSchema).min(8).max(12)
+  questions: z.array(placementQuestionSchema).length(10)
 })
 
 export const curriculumLessonSchema = z.object({
-  title: z.string().min(2),
-  objective: z.string().min(2)
+  title: short,
+  objective: mid
 })
 
 export const curriculumUnitSchema = z.object({
-  title: z.string().min(2),
-  description: z.string().min(2),
+  title: short,
+  description: mid,
   level: cefrSchema,
   lessons: z.array(curriculumLessonSchema).min(2).max(4)
 })
@@ -31,16 +47,16 @@ export const curriculumSchema = z.object({
 })
 
 export const lessonContentSchema = z.object({
-  title: z.string().min(2),
+  title: short,
   level: cefrSchema,
-  objective: z.string().min(2),
-  explanation: z.string().min(10),
+  objective: mid,
+  explanation: long,
   /** M4: pares "target" (idioma ensinado) / "native" (idioma do aluno), sem hardcode en/pt. */
   examples: z
     .array(
       z.object({
-        target: z.string().min(1),
-        native: z.string().min(1)
+        target: mid,
+        native: mid
       })
     )
     .min(2)
@@ -48,9 +64,9 @@ export const lessonContentSchema = z.object({
   grammarPoints: z
     .array(
       z.object({
-        title: z.string().min(2),
-        explanation: z.string().min(2),
-        examples: z.array(z.string().min(1)).min(1).max(4)
+        title: short,
+        explanation: long,
+        examples: z.array(mid).min(1).max(4)
       })
     )
     .min(1)
@@ -62,10 +78,10 @@ export const lessonContentSchema = z.object({
   pitfalls: z
     .array(
       z.object({
-        tag: z.string().min(2),
-        wrong: z.string().min(1),
-        right: z.string().min(1),
-        note: z.string().min(1)
+        tag: z.string().min(2).max(80),
+        wrong: mid,
+        right: mid,
+        note: mid
       })
     )
     .max(4)
@@ -73,9 +89,9 @@ export const lessonContentSchema = z.object({
   vocabulary: z
     .array(
       z.object({
-        term: z.string().min(1),
-        translation: z.string().min(1),
-        example: z.string().min(1)
+        term: z.string().min(1).max(200),
+        translation: z.string().min(1).max(200),
+        example: mid
       })
     )
     .min(4)
@@ -90,18 +106,38 @@ export const exerciseTypeSchema = z.enum([
   'free_production'
 ])
 
-export const generatedExerciseSchema = z.object({
-  type: exerciseTypeSchema,
-  instruction: z.string().min(2),
-  prompt: z.string().min(1),
-  options: z.array(z.string().min(1)).default([]),
-  tokens: z.array(z.string().min(1)).default([]),
-  answer: z.string().min(1),
-  alternatives: z.array(z.string().min(1)).default([]),
-  explanation: z.string().default(''),
-  /** Tags de erro que este exercício treina (vêm do caderno de erros). */
-  targetTags: z.array(z.string()).default([])
-})
+export const generatedExerciseSchema = z
+  .object({
+    type: exerciseTypeSchema,
+    instruction: mid,
+    prompt: long,
+    options: z.array(mid).default([]),
+    tokens: z.array(z.string().min(1).max(200)).default([]),
+    answer: mid,
+    alternatives: z.array(mid).default([]),
+    explanation: long.default(''),
+    /** Tags de erro que este exercício treina (vêm do caderno de erros). */
+    targetTags: z.array(z.string().max(80)).default([])
+  })
+  .superRefine((exercise, ctx) => {
+    // M6 (D3/D4): o contrato de múltipla escolha fecha aqui — 4 opções e a
+    // resposta correta **dentro** delas. Gabarito fora das opções é exercício
+    // impossível, e modelo fraco faz isso direto.
+    if (exercise.type !== 'multiple_choice') return
+    if (exercise.options.length !== 4) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'multiple_choice exige exatamente 4 opções',
+        path: ['options']
+      })
+    } else if (!exercise.options.includes(exercise.answer)) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'answer precisa ser uma das options',
+        path: ['answer']
+      })
+    }
+  })
 
 export const exerciseSetSchema = z.object({
   exercises: z.array(generatedExerciseSchema).min(4).max(8)
@@ -110,17 +146,17 @@ export const exerciseSetSchema = z.object({
 export const gradeSchema = z.object({
   correct: z.boolean(),
   score: z.number().min(0).max(1),
-  feedback: z.string().min(1),
-  corrected: z.string().default(''),
-  errorTags: z.array(z.string()).default([])
+  feedback: z.string().min(1).max(1_200),
+  corrected: mid.default(''),
+  errorTags: z.array(z.string().max(80)).default([])
 })
 
 /** Correção de texto livre do aluno (usada no chat com o tutor). */
 export const correctionItemSchema = z.object({
-  original: z.string().min(1),
-  corrected: z.string().min(1),
-  tag: z.string().min(1),
-  note: z.string().default('')
+  original: mid,
+  corrected: mid,
+  tag: z.string().min(1).max(80),
+  note: mid.default('')
 })
 
 export const correctionSetSchema = z.object({
@@ -132,7 +168,7 @@ export const correctionSetSchema = z.object({
 
 /** Resumo rolante de uma conversa longa, injetado no lugar das mensagens antigas. */
 export const conversationSummarySchema = z.object({
-  summary: z.string().min(10)
+  summary: z.string().min(10).max(4_000)
 })
 
 export type PlacementOutput = z.infer<typeof placementSchema>
@@ -145,46 +181,70 @@ export type CorrectionSetOutput = z.infer<typeof correctionSetSchema>
 export type ConversationSummaryOutput = z.infer<typeof conversationSummarySchema>
 
 export const trackPlanSchema = z.object({
-  title: z.string().min(2),
-  goalTag: z.string().min(2),
+  title: short,
+  goalTag: z.string().min(2).max(80),
   lessons: z.array(
     z.object({
-      title: z.string().min(2),
-      objective: z.string().min(2),
-      focusVocabulary: z.array(z.string()).min(1).max(10)
+      title: short,
+      objective: mid,
+      focusVocabulary: z.array(z.string().min(1).max(120)).min(1).max(10)
     })
   ).min(5).max(8)
 })
 
+/**
+ * M6 (D4): contrato do plano **armazenado** — o output de `normalizeTrackPlan`
+ * é revalidado contra isto antes de virar `focus_tracks.plan`. O piso de
+ * lições aqui é o que cabe de verdade (modelos fracos e idiomas sem banco
+ * devolvem menos que as 5 pedidas); o teto e as formas, não.
+ */
+export const storedTrackPlanSchema = z.object({
+  title: z.string().min(1).max(200),
+  goalTag: z.string().min(1).max(80),
+  lessons: z.array(
+    z.object({
+      title: z.string().min(1).max(200),
+      objective: z.string().min(0).max(600),
+      focusVocabulary: z.array(z.string().min(1).max(120)).max(10)
+    })
+  ).min(1).max(8)
+})
+
 export const scenarioSchema = z.object({
-  persona: z.string().min(3),
-  setting: z.string().min(3),
-  successCriteria: z.array(z.string().min(3)).min(2).max(5),
-  openingLine: z.string().min(3)
+  persona: mid,
+  setting: mid,
+  successCriteria: z.array(z.string().min(3).max(300)).min(2).max(5),
+  openingLine: mid
 })
 
 /**
- * Rubrica do roleplay: conteúdo e língua em scores separados. `criteriaMet` é o
- * checklist dos critérios de sucesso, na mesma ordem recebida no prompt — é o
- * que impede "soa fluente, não respondeu nada" de tirar nota boa.
+ * Rubrica do roleplay: conteúdo e língua em scores separados. M6 (D4):
+ * `criteriaMet` tem **exatamente** o tamanho do checklist enviado no prompt —
+ * construído por fábrica porque o número de critérios é dinâmico. Sem isto o
+ * modelo "esquece" um critério e a rubrica infla sozinha.
  */
-export const scenarioFeedbackSchema = z.object({
-  contentScore: z.number().min(0).max(1),
-  languageScore: z.number().min(0).max(1),
-  feedback: z.string().min(10),
-  criteriaMet: z.array(z.boolean()).max(5).default([]),
-  bestPhrases: z
-    .array(
-      z.object({
-        original: z.string().min(1),
-        improved: z.string().min(1),
-        reason: z.string().default('')
-      })
-    )
-    .max(3)
-    .default([]),
-  followUpDrill: z.string().default('')
-})
+export function scenarioFeedbackSchemaFor(criteriaCount: number) {
+  return z.object({
+    contentScore: z.number().min(0).max(1),
+    languageScore: z.number().min(0).max(1),
+    feedback: z.string().min(10).max(2_000),
+    criteriaMet: z.array(z.boolean()).length(criteriaCount),
+    bestPhrases: z
+      .array(
+        z.object({
+          original: mid,
+          improved: mid,
+          reason: mid.default('')
+        })
+      )
+      .max(3)
+      .default([]),
+    followUpDrill: mid.default('')
+  })
+}
+
+/** Versão estática para tipagem/exportas (a validação real usa a fábrica). */
+export const scenarioFeedbackSchema = scenarioFeedbackSchemaFor(2)
 
 export type TrackPlanOutput = z.infer<typeof trackPlanSchema>
 export type ScenarioOutput = z.infer<typeof scenarioSchema>

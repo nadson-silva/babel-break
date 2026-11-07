@@ -124,8 +124,8 @@ describe('par sem banco manual (japonês)', () => {
   })
 })
 
-describe('legado: conteúdo salvo antes do M4', () => {
-  it('exemplos {en, pt} viram {target, native} sem quebrar a lição', () => {
+describe('legado: conteúdo salvo antes da versionagem (M6/D1)', () => {
+  it('conteúdo sem carimbo de versão é stale — o leitor recusa, e a regeneração cuida', () => {
     const legacy = JSON.stringify({
       title: 'Artigos',
       level: 'A1',
@@ -136,9 +136,28 @@ describe('legado: conteúdo salvo antes do M4', () => {
       vocabulary: [{ term: 'developer', translation: 'desenvolvedor', example: 'I am a developer.' }]
     })
 
-    const content = readLessonContent(legacy)
-    expect(content?.examples[0]).toEqual({ target: 'I am a developer.', native: 'Eu sou desenvolvedor.' })
-    expect(readLessonContent('{"sem": "exemplos"}')?.examples).toEqual([])
+    // D1: nada de shim à mão. `null` = cache velho = lição volta pela fila de
+    // aquecimento e é regrada com o contrato atual (promptVersion/schemaVersion).
+    expect(readLessonContent(legacy)).toBeNull()
+    expect(readLessonContent('{"sem": "exemplos"}')).toBeNull()
     expect(readLessonContent(null)).toBeNull()
+  })
+
+  it('conteúdo carimbado com a versão atual abre', () => {
+    const stamped = JSON.stringify({
+      title: 'Artigos',
+      level: 'A1',
+      objective: 'usar a/an/the',
+      explanation: 'Profissão pede artigo.',
+      examples: [{ target: 'I am a developer.', native: 'Eu sou desenvolvedor.' }],
+      grammarPoints: [{ title: 'a/an', explanation: '...', examples: ['I am a developer.'] }],
+      vocabulary: [{ term: 'developer', translation: 'desenvolvedor', example: 'I am a developer.' }],
+      promptVersion: 1,
+      schemaVersion: 1
+    })
+    expect(readLessonContent(stamped)?.examples[0]).toEqual({
+      target: 'I am a developer.',
+      native: 'Eu sou desenvolvedor.'
+    })
   })
 })

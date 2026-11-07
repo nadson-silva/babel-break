@@ -9,7 +9,6 @@ import type {
   GradeFeedback,
   LessonContentView,
   LessonDetail,
-  LessonExample,
   LessonResultView,
   LessonStatus,
   LessonSummary,
@@ -48,6 +47,8 @@ import {
   gradeSchema,
   lessonContentSchema,
   placementSchema,
+  PROMPT_VERSION,
+  SCHEMA_VERSION,
   type CurriculumOutput,
   type ExerciseSetOutput,
   type LessonContentOutput
@@ -91,6 +92,9 @@ interface ExercisePayload {
   options: string[]
   tokens: string[]
   targetTags?: string[]
+  /** M6 (D1): contrato com que o exercício foi gerado (ver `core/schemas.ts`). */
+  promptVersion?: number
+  schemaVersion?: number
 }
 
 function parseJson<T>(value: string | null | undefined): T | null {
@@ -103,21 +107,17 @@ function parseJson<T>(value: string | null | undefined): T | null {
 }
 
 /**
- * Lê `lessons.content` com tolerância ao formato pré-M4, que usava as chaves
- * fixas `en`/`pt` nos exemplos. Conteúdo antigo continua abrindo; conteúdo
- * novo é salvo já em `target`/`native`.
+ * Lê `lessons.content` exigindo o carimbo de versão do contrato (M6/D1).
+ * Qualquer conteúdo gravado por versão anterior de prompt/schema é **stale**:
+ * `null` aqui manda a lição pela fila de regeneração — o shim manual de
+ * `en`/`pt` → `target`/`native` do M4 morreu, remendo à mão é o que o plano
+ * proíbe ("nunca por shim").
  */
 export function readLessonContent(value: string | null | undefined): LessonContentView | null {
-  type LegacyExample = Partial<LessonExample> & { en?: string; pt?: string }
-  const raw = parseJson<Omit<LessonContentView, 'examples'> & { examples?: LegacyExample[] }>(value)
+  const raw = parseJson<LessonContentView>(value)
   if (!raw) return null
-
-  const examples: LessonExample[] = (raw.examples ?? []).map((example) => ({
-    target: example.target ?? example.en ?? '',
-    native: example.native ?? example.pt ?? ''
-  }))
-
-  return { ...(raw as LessonContentView), examples }
+  if (raw.schemaVersion !== SCHEMA_VERSION || raw.promptVersion !== PROMPT_VERSION) return null
+  return raw
 }
 
 function toStatus(value: string | null | undefined): LessonStatus {
@@ -435,6 +435,16 @@ function exercisePayload(row: { payload: string }): ExercisePayload {
   )
 }
 
+/**
+ * M6 (D1): exercício nascido sob contrato divergente é `stale` — não conta
+ * como utilizável, não chega ao aluno, e sai do bloco quando a lição é
+ * recomposta. Versão divergente nunca é remendada à mão.
+ */
+function exerciseIsCurrent(row: { payload: string }): boolean {
+  const payload = parseJson<ExercisePayload>(row.payload)
+  return payload?.schemaVersion === SCHEMA_VERSION && payload?.promptVersion === PROMPT_VERSION
+}
+
 function toExerciseView(row: ExerciseRow): ExerciseView {
   const payload = exercisePayload(row)
   return {
@@ -461,6 +471,52 @@ function toExerciseView(row: ExerciseRow): ExerciseView {
  *   contagem, mas continuam no banco (o histórico de tentativas e o report
  *   apontam para eles) e são repostos por itens novos, sem descartar os bons.
  */
+/**
+ * M6 (C1): mutex por lição, no formato do `curriculumJob`. Sem isto a
+ * pré-geração ociosa e a abertura do aluno corriam juntas e a mesma lição era
+ * gerada — e paga — duas vezes. Pedido explícito de regeneração não é perdido:
+ * encadeia depois do job vivo, nunca sobrepõe.
+ */
+const lessonJobs = new Map<number, Promise<ErrorFocusEntry[]>>()
+
+function ensureLessonGeneratedOnce(
+  lesson: LessonRow,
+  profile: ProfileRow,
+  owner: LessonOwner,
+  options: { forceExercises?: boolean; prewarm?: boolean; minExercises?: number } = {}
+): Promise<ErrorFocusEntry[]> {
+  const pending = lessonJobs.get(lesson.id)
+
+  if (pending && options.forceExercises !== true) {
+    return pending
+  }
+
+  const run = (): Promise<ErrorFocusEntry[]> => {
+    // O job encadeado (regeneração pedida depois de um job vivo) relê a linha:
+    // o objeto `lesson` que chegou pode ser pré-histórico.
+    const fresh =
+      pending != null
+        ? (getDb()
+            .select()
+            .from(schema.lessons)
+            .where(eq(schema.lessons.id, lesson.id))
+            .get() ?? lesson)
+        : lesson
+    return ensureLessonGenerated(fresh, profile, owner, options)
+  }
+
+  const job = pending ? pending.catch(() => undefined).then(run) : run()
+
+  void job
+    .catch(() => undefined)
+    .finally(() => {
+      if (lessonJobs.get(lesson.id) === job) lessonJobs.delete(lesson.id)
+    })
+
+  lessonJobs.set(lesson.id, job)
+  return job
+}
+
 async function ensureLessonGenerated(
   lesson: LessonRow,
   profile: ProfileRow,
@@ -552,7 +608,11 @@ async function ensureLessonGenerated(
       db.transaction((tx) => {
         tx.update(schema.lessons)
           .set({
-            content: JSON.stringify(resolved as LessonContentView),
+            content: JSON.stringify({
+              ...(resolved as LessonContentView),
+              promptVersion: PROMPT_VERSION,
+              schemaVersion: SCHEMA_VERSION
+            } satisfies LessonContentView),
             level: (resolved as LessonContentView).level,
             version: lesson.version + 1,
             staleAt: null,
@@ -601,7 +661,8 @@ async function ensureLessonGenerated(
     .where(eq(schema.exercises.lessonId, lesson.id))
     .all()
 
-  const usable = existingExercises.filter((row) => !row.blocked)
+  const usable = existingExercises.filter((row) => !row.blocked && exerciseIsCurrent(row))
+  const staleRows = existingExercises.filter((row) => !row.blocked && !exerciseIsCurrent(row))
 
   if (usable.length >= minExercises && !options.forceExercises) return focus
 
@@ -703,7 +764,10 @@ async function ensureLessonGenerated(
       prompt: promptText,
       options: options_,
       tokens,
-      targetTags: exercise.targetTags ?? []
+      targetTags: exercise.targetTags ?? [],
+      // M6 (D1): carimbo do contrato — rascunhos sem versão são stale.
+      promptVersion: PROMPT_VERSION,
+      schemaVersion: SCHEMA_VERSION
     }
 
     const answerKey: ExerciseAnswerKey = {
@@ -725,7 +789,7 @@ async function ensureLessonGenerated(
 
   if (rows.length === 0) return focus
 
-  const dropIds = replaceWholeBlock ? usable.map((row) => row.id) : []
+  const dropIds = replaceWholeBlock ? [...usable, ...staleRows].map((row) => row.id) : []
 
   db.transaction((tx) => {
     if (dropIds.length > 0) {
@@ -767,7 +831,15 @@ function usableExerciseCount(lessonId: number): number {
     getDb()
       .select({ value: count() })
       .from(schema.exercises)
-      .where(and(eq(schema.exercises.lessonId, lessonId), eq(schema.exercises.blocked, false)))
+      .where(
+        and(
+          eq(schema.exercises.lessonId, lessonId),
+          eq(schema.exercises.blocked, false),
+          // M6 (D1): contagem só considera o contrato de versão atual.
+          sql`json_extract(${schema.exercises.payload}, '$.schemaVersion') = ${SCHEMA_VERSION}`,
+          sql`json_extract(${schema.exercises.payload}, '$.promptVersion') = ${PROMPT_VERSION}`
+        )
+      )
       .get()?.value ?? 0
   )
 }
@@ -843,7 +915,7 @@ export async function prewarmLesson(lessonId: number): Promise<{
   const hadContent = Boolean(owned.lesson.content) && owned.lesson.staleAt == null
   const before = usableExerciseCount(lessonId)
 
-  await ensureLessonGenerated(owned.lesson, profile, owned.owner, {
+  await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, {
     prewarm: true,
     minExercises: PREWARM_MIN_EXERCISES
   })
@@ -865,7 +937,7 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  const focus = await ensureLessonGenerated(owned.lesson, profile, owned.owner)
+  const focus = await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner)
 
   const fresh = getOwnedLesson(lessonId, profile.id)
   if (!fresh) throw new Error('Lição não encontrada.')
@@ -873,13 +945,15 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
   const content = readLessonContent(fresh.lesson.content)
   if (!content) throw new Error('Não foi possível carregar o conteúdo da lição.')
 
-  // Exercícios reportados como ruins não voltam para a prática.
+  // Exercícios reportados como ruins (ou nascidos de contrato divergente, D1)
+  // não voltam para a prática.
   const exerciseRows = db
     .select()
     .from(schema.exercises)
     .where(and(eq(schema.exercises.lessonId, lessonId), eq(schema.exercises.blocked, false)))
     .orderBy(asc(schema.exercises.position), asc(schema.exercises.id))
     .all()
+    .filter(exerciseIsCurrent)
 
   if (exerciseRows.length === 0) {
     throw new Error('A lição foi gerada sem exercícios. Tente abrir novamente.')
@@ -946,7 +1020,7 @@ export async function regenerateLessonExercises(lessonId: number): Promise<Lesso
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  await ensureLessonGenerated(owned.lesson, profile, owned.owner, { forceExercises: true })
+  await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, { forceExercises: true })
   return openLesson(lessonId)
 }
 

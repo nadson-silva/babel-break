@@ -25,6 +25,16 @@ export function promptLocale(targetLang: string | null | undefined, nativeLang: 
 
 export const DEFAULT_LOCALE = promptLocale('en', 'pt-BR')
 
+/**
+ * M6 (D5): delimitador de texto livre. Qualquer texto vindo do aluno ou do
+ * modelo que entra num prompt de contrato JSON vai entre `"""…"""` — o modelo
+ * para de confundir conteúdo com instrução (injection em output estruturado,
+ * e o caso banal de objetivo com aspas/quebras de linha).
+ */
+export function quoted(value: string): string {
+  return `"""${value.replaceAll('"""', '""" ')}"""`
+}
+
 /** Restrições de escrita/registro do idioma-alvo que vão no system prompt. */
 function localeNotes(locale: PromptLocale): string {
   const notes: string[] = []
@@ -84,7 +94,7 @@ export function placementPrompt(goal: string, locale: PromptLocale): { system: s
     system: baseSystem(locale),
     user: [
       `Crie um teste de nivelamento de ${locale.targetName} com EXATAMENTE 10 questões de múltipla escolha.`,
-      `Objetivo do aluno: ${goal || 'conversação geral'}.`,
+      `Objetivo do aluno: ${goal.trim() ? quoted(goal) : 'conversação geral'}.`,
       'Cubra A1, A2, B1 e B2, em ordem crescente de dificuldade (comece fácil, termine difícil).',
       'Cada questão deve ter 4 opções e exatamente uma correta.',
       'Use frases curtas e situações do dia a dia, trabalho e viagem, no idioma-alvo.',
@@ -130,7 +140,7 @@ export function lessonContentPrompt(input: {
     system: baseSystem(locale),
     user: [
       `Prepare o conteúdo da lição "${input.title}" (${input.level}) da ${input.track ? `trilha "${input.track.title}"` : `unidade "${input.unitTitle}"`}.`,
-      `Objetivo da lição: ${input.objective}. Objetivo do aluno: ${input.goal || 'conversação geral'}.`,
+      `Objetivo da lição: ${quoted(input.objective)}. Objetivo do aluno: ${input.goal.trim() ? quoted(input.goal) : 'conversação geral'}.`,
       `Dificuldade TRAVADA no nível ${input.level}: vocabulário, frases e temas condizentes com esse nível — A1/A2 = frases curtas e concretas do dia a dia; B1/B2 = opinião, hipóteses, narrativa; C1 = temas abstratos, nuance de registro e estruturas complexas. Nunca recicle frases básicas de nível inicial numa lição avançada.`,
       `No JSON de resposta, o campo "level" deve ser exatamente "${input.level}" — a lição não rebaixa nem promove o aluno.`,
       `A explicação deve ter 2 a 4 parágrafos curtos em ${locale.nativeName}, com exemplos em ${locale.targetName} no meio.`,
@@ -183,7 +193,7 @@ export function exercisePrompt(input: {
     system: baseSystem(locale),
     user: [
       `Crie EXATAMENTE 6 exercícios para a lição "${input.content.title}" (${input.level}).`,
-      `Objetivo: ${input.content.objective}. Objetivo do aluno: ${input.goal || 'conversação geral'}.`,
+      `Objetivo: ${quoted(input.content.objective)}. Objetivo do aluno: ${input.goal.trim() ? quoted(input.goal) : 'conversação geral'}.`,
       `Dificuldade TRAVADA no nível ${input.level}: frases, vocabulário e temas desse nível — nada de rotina básica de A1/A2 em lição ${input.level}. Os enunciados devem girar em torno do ASSUNTO da lição, não de exemplos genéricos.`,
       `Vocabulário-alvo: ${vocabulary}.`,
       'Inclua, nesta ordem, um de cada tipo: multiple_choice, cloze, order, translate, free_production e mais um multiple_choice.',
@@ -299,13 +309,13 @@ export function tutorSystem(context: TutorContext): string {
     '',
     'Erros recorrentes do aluno (priorize o recast destes):',
     errorLines,
-    `Vocabulário recente que ele está aprendendo (use quando couber, sem forçar): ${vocabulary}.`,
+    `Vocabulário recente que ele está aprendendo (use quando couber, sem forçar): ${quoted(vocabulary)}.`,
     context.lesson
-      ? `A conversa vem da lição "${context.lesson.title}" (${context.lesson.objective}). Estruturas da lição para reaparecerem: ${context.lesson.grammar.join(', ') || '—'}.`
+      ? `A conversa vem da lição ${quoted(context.lesson.title)} (${quoted(context.lesson.objective)}). Estruturas da lição para reaparecerem: ${context.lesson.grammar.join(', ') || '—'}.`
       : '',
-    context.topic ? `Tema pedido pelo aluno: ${context.topic}.` : '',
+    context.topic ? `Tema pedido pelo aluno: ${quoted(context.topic)}.` : '',
     scenarioSection(context.scenario ?? null, locale),
-    context.summary ? `Resumo da conversa até agora: ${context.summary}` : ''
+    context.summary ? `Resumo da conversa até agora: ${quoted(context.summary)}` : ''
   ]
     .filter(Boolean)
     .join('\n')
@@ -364,7 +374,7 @@ export function correctionPrompt(input: {
       `Nível: ${input.level}.`,
       `Erros recorrentes dele (use as mesmas tags quando se aplicar):`,
       focusSection(input.errors, 6, `banco de interferência ${locale.nativeName}→${locale.targetName}`),
-      `Mensagem do aluno: ${input.text}`,
+      `Mensagem do aluno: ${quoted(input.text)}`,
       'corrections: apenas erros de LÍNGUA (gramática, palavra, preposição, concordância, ordem). Ignore estilo e preferências.',
       `original: o trecho exatamente como o aluno escreveu. corrected: o mesmo trecho corrigido em ${locale.targetName}, substituível no texto.`,
       'tag: 1 tag curta em inglês, kebab-case, consistente (ex.: past-simple, articles, verb-preposition, question-word-order).',
@@ -386,8 +396,8 @@ export function summaryPrompt(input: {
     system: baseSystem(locale),
     user: [
       `Resuma a parte antiga de uma conversa entre tutor e aluno de ${locale.targetName}.`,
-      input.current ? `Resumo anterior: ${input.current}` : 'Não há resumo anterior.',
-      `Trecho a incorporar:\n${input.transcript}`,
+      input.current ? `Resumo anterior: ${quoted(input.current)}` : 'Não há resumo anterior.',
+      `Trecho a incorporar:\n${quoted(input.transcript)}`,
       `summary: 3 a 5 frases em ${locale.nativeName} dizendo o que foi conversado, quais erros apareceram e o que o aluno já conseguia dizer.`
     ].join('\n')
   }
@@ -407,8 +417,8 @@ export function trackPlanPrompt(input: {
     system: baseSystem(locale),
     user: [
       `Monte o esboço de uma trilha de foco para um aluno de ${locale.targetName} no nível ${input.level}.`,
-      `Tópico desta trilha (OBRIGATÓRIO — o esboço inteiro nasce daqui, e só daqui): ${input.objective}.`,
-      `Objetivo geral do aluno (apenas contexto do perfil; se for de OUTRO domínio, ignore-o nesta trilha): ${input.goal || 'conversação geral'}.`,
+      `Tópico desta trilha (OBRIGATÓRIO — o esboço inteiro nasce daqui, e só daqui): ${quoted(input.objective)}.`,
+      `Objetivo geral do aluno (apenas contexto do perfil; se for de OUTRO domínio, ignore-o nesta trilha): ${input.goal.trim() ? quoted(input.goal) : 'conversação geral'}.`,
       'A trilha é um mini-currículo: 5 a 8 lições em ordem de dificuldade, todas dentro do domínio pedido.',
       `A progressão gramatical NÃO muda por causa da trilha: mantenha a complexidade no nível ${input.level}. O que muda é o domínio do vocabulário e as situações.`,
       'Campos:',
@@ -435,7 +445,7 @@ export function scenarioGenPrompt(input: {
     system: baseSystem(locale),
     user: [
       `Crie um cenário de roleplay para o aluno praticar a lição "${input.lessonTitle}" (${input.level}).`,
-      `Objetivo da lição: ${input.objective}. Objetivo geral do aluno: ${input.goal || 'conversação geral'}.`,
+      `Objetivo da lição: ${quoted(input.objective)}. Objetivo geral do aluno: ${input.goal.trim() ? quoted(input.goal) : 'conversação geral'}.`,
       'Campos:',
       `- persona: quem o tutor vai interpretar, em ${locale.nativeName} (ex.: "entrevistador técnico de uma startup, objetivo e simpático").`,
       `- setting: onde e quando a conversa acontece, em ${locale.nativeName}, 1 frase.`,
@@ -462,11 +472,11 @@ export function scenarioFeedbackPrompt(input: {
     user: [
       `Avalie o desempenho de um aluno falante de ${locale.nativeName} em um roleplay de ${locale.targetName}.`,
       `Nível do aluno: ${input.level}.`,
-      `Personagem: ${input.persona}. Contexto: ${input.setting}.`,
+      `Personagem: ${quoted(input.persona)}. Contexto: ${quoted(input.setting)}.`,
       'Critérios de sucesso da tarefa (avalie um a um):',
-      input.criteria.map((criterion, index) => `${index + 1}. ${criterion}`).join('\n'),
+      input.criteria.map((criterion, index) => `${index + 1}. ${quoted(criterion)}`).join('\n'),
       'Transcrição da conversa:',
-      input.transcript,
+      quoted(input.transcript),
       'Campos:',
       '- contentScore: fração dos critérios de TAREFA cumpridos (0 a 1). Ignore gramática aqui.',
       '- criteriaMet: um booleano por critério, na mesma ordem da lista acima (true = o aluno cumpriu).',

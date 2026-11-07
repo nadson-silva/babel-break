@@ -12,7 +12,7 @@
  */
 import type { CefrLevel } from '../shared/types'
 import { clampLevel, levelIndex } from './cefr'
-import type { ScenarioFeedbackOutput, ScenarioOutput, TrackPlanOutput } from './schemas'
+import { storedTrackPlanSchema, type ScenarioFeedbackOutput, type ScenarioOutput, type TrackPlanOutput } from './schemas'
 
 export type TrackBucket = 'interview' | 'travel' | 'work' | 'exam' | 'general'
 
@@ -562,11 +562,15 @@ export function normalizeTrackPlan(input: {
     })
   }
 
-  return {
+  const result = {
     title: (raw.title ?? '').trim() || (allowSeedFill ? seed.title : (input.objective.trim().slice(0, 60) || 'Trilha de foco')),
     goalTag: slug(raw.goalTag ?? '', bucket),
     lessons: filled.slice(0, MAX_LESSONS)
   }
+
+  // M6 (D4): o plano normalizado revalida no zod antes de seguir para o
+  // banco — forma errada aqui é exceção clara, não `focus_tracks.plan` podre.
+  return storedTrackPlanSchema.parse(result)
 }
 
 /** Trilha determinística: mesma máquina de lições, sem gastar token. */

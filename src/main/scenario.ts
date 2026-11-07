@@ -26,7 +26,7 @@ import type {
 import { clampLevel } from '../core/cefr'
 import { scenarioFeedbackPrompt, scenarioGenPrompt, promptLocale } from '../core/prompts'
 import { deterministicContentSupported, tokenize } from '../core/languages'
-import { scenarioFeedbackSchema, scenarioSchema, type ScenarioOutput } from '../core/schemas'
+import { scenarioFeedbackSchemaFor, scenarioSchema, type ScenarioOutput } from '../core/schemas'
 import { detectBucket, fallbackScenario, scenarioFeedbackFrom } from '../core/tracks'
 import { phraseCard } from '../core/srs'
 import { currentModel, generateStructured } from './ai'
@@ -379,11 +379,16 @@ export async function finishScenarioRun(
       locale
     })
 
-    const graded = await generateStructured(scenarioFeedbackSchema, {
-      system: prompt.system,
-      user: prompt.user,
-      temperature: 0.3
-    })
+    // M6 (D4): `criteriaMet` é validado com o tamanho EXATO dos critérios deste
+    // cenário — nada de checklist incompleto passar e inflar a rubrica.
+    const graded = await generateStructured(
+      scenarioFeedbackSchemaFor(scenario.successCriteria.length),
+      {
+        system: prompt.system,
+        user: prompt.user,
+        temperature: 0.3
+      }
+    )
 
     contentScore = graded.contentScore
     languageScore = graded.languageScore

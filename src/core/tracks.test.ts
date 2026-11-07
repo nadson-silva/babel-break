@@ -358,7 +358,7 @@ describe('prompts das trilhas e do cenário', () => {
       locale: DEFAULT_LOCALE
     })
 
-    expect(prompt.user).toContain('1. apresentar sua trajetória')
+    expect(prompt.user).toContain('1. """apresentar sua trajetória"""')
     expect(prompt.user).toContain('contentScore')
     expect(prompt.user).toContain('languageScore')
     expect(prompt.user).toContain('criteriaMet')

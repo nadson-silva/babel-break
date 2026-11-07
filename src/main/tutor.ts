@@ -42,7 +42,7 @@ import {
   type TutorContext
 } from '../core/prompts'
 import { correctionSetSchema, conversationSummarySchema } from '../core/schemas'
-import { currentModel, generateStructured } from './ai'
+import { currentModel, generateStructured, trackedStream } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
 import { emitStudentEvent } from './events'
 import { profileInterferenceRules, profileNativeLang } from './locale'
@@ -50,7 +50,6 @@ import { runtimeText } from '../core/runtime-text'
 import { errorHints, recordCorrections } from './notebook'
 import { cardsForErrorsFrom } from './review'
 import { trackContextOf } from './tracks'
-import { getProvider } from './providers'
 import { getSettings } from './settings'
 
 type ConversationRow = typeof schema.conversations.$inferSelect
@@ -310,13 +309,14 @@ function streamReply(
   signal: AbortSignal | null,
   onToken?: (token: string) => void
 ): Promise<string> {
-  const settings = getSettings()
   const model = currentModel()
   if (!model) {
     return Promise.reject(new Error('Nenhum modelo selecionado. Escolha um modelo em Configurações.'))
   }
 
-  return getProvider(settings.provider).stream(
+  // M6 (C2/C3): stream monitorado — conta no aiInFlight (a pré-geração espera
+  // quem conversa) e morre no deadline se o provedo emudecer no meio.
+  return trackedStream(
     {
       model,
       messages: [{ role: 'system', content: tutorSystem(context) }, ...turn],

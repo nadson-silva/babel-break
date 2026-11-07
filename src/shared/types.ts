@@ -207,6 +207,9 @@ export interface LessonContentView {
   pitfalls?: LessonPitfall[]
   /** 'fallback' quando o conteúdo veio do gerador determinístico local. */
   source?: 'ai' | 'fallback'
+  /** M6 (D1): carimbo do contrato de prompt/schema com que o cache foi gravado. */
+  promptVersion?: number
+  schemaVersion?: number
 }
 
 export type LessonStatus = 'not_started' | 'in_progress' | 'completed'
