@@ -126,7 +126,11 @@ export function shuffleTokens(tokens: string[], seed = Date.now()): string[] {
 
   for (let index = shuffled.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(random() * (index + 1))
-    ;[shuffled[index], shuffled[swap]] = [shuffled[swap], shuffled[index]]
+    const current = shuffled[index]
+    const other = shuffled[swap]
+    if (current === undefined || other === undefined) continue
+    shuffled[index] = other
+    shuffled[swap] = current
   }
 
   return shuffled

@@ -17,7 +17,7 @@ export function levelFromScore(score: number): CefrLevel {
 
 export function nextLevel(level: CefrLevel): CefrLevel {
   const index = levelIndex(level)
-  return CEFR_LEVELS[Math.min(index + 1, CEFR_LEVELS.length - 1)]
+  return CEFR_LEVELS[Math.min(index + 1, CEFR_LEVELS.length - 1)] ?? 'C1'
 }
 
 export function clampLevel(level: string | null | undefined): CefrLevel {

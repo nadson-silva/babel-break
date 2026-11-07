@@ -74,7 +74,7 @@ export function isReportReason(value: unknown): value is ReportReason {
 /** Motivo válido para o tipo; cai no primeiro da lista quando não bate. */
 export function reasonFor(kind: ReportKind, reason: unknown): ReportReason {
   const candidates = REASONS_BY_KIND[kind]
-  return isReportReason(reason) && candidates.includes(reason) ? reason : candidates[0]
+  return isReportReason(reason) && candidates.includes(reason) ? reason : (candidates[0] ?? 'other')
 }
 
 /**

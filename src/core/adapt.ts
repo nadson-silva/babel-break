@@ -138,6 +138,6 @@ export function reestimateLevel(
 
   if (delta === 0) return null
 
-  const bounded = CEFR_LEVELS[levelIndex(current) + Math.sign(delta)]
+  const bounded = CEFR_LEVELS[levelIndex(current) + Math.sign(delta)] ?? current
   return { cefr: bounded, confidence }
 }

@@ -63,7 +63,7 @@ export function TutorScreen({
     setConversations(list)
     setDue(review)
     setRuns(scenarioRuns)
-    if (list.length > 0) setActiveId((current) => current ?? list[0].id)
+    if (list.length > 0) setActiveId((current) => current ?? list[0]?.id ?? null)
   }, [])
 
   useEffect(() => {

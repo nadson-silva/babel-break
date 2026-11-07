@@ -113,7 +113,7 @@ export function OnboardingScreen({ settings, languages, onDone }: OnboardingScre
   }
 
   const question = test?.questions[current]
-  const answered = question ? answers[current] >= 0 : false
+  const answered = question ? (answers[current] ?? -1) >= 0 : false
   const allAnswered = test ? answers.every((answer) => answer >= 0) : false
 
   return (

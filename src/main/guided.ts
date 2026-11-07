@@ -130,7 +130,7 @@ function pickLesson(profileId: number): { id: number; title: string; isScenario:
     hasFocus: focus.length > 0
   })
 
-  if (origin === 'focus') {
+  if (origin === 'focus' && focus[0]) {
     const lesson = focus[0]
     return { id: lesson.id, title: lesson.title, isScenario: lesson.isScenario }
   }

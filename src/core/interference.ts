@@ -158,6 +158,18 @@ function directQuestionOnly(before: string): boolean {
   return SENTENCE_EDGE.test(before)
 }
 
+/**
+ * M6 (F4): com `noUncheckedIndexedAccess`, todo `match[i]` é
+ * `string | undefined`. Os callbacks abaixo só indexam grupos que a própria
+ * regex garante (obrigatórios); grupos opcionais continuam com o valor
+ * tratado explicitamente.
+ */
+function group(match: RegExpMatchArray, index: number): string {
+  const value = match[index]
+  if (value === undefined) throw new Error(`grupo ${index} ausente na regra de interferência`)
+  return value
+}
+
 export const INTERFERENCE_BANK: InterferenceRule[] = [
   {
     id: 'have-age',
@@ -173,7 +185,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'stative-verbs',
     find: /\b(i'?m|i\s+am|we'?re|we\s+are|they'?re|they\s+are)\s+agree\b/gi,
     to: (match) => {
-      const subject = /^i/i.test(match[1]) ? 'I' : /^we/i.test(match[1]) ? 'We' : 'They'
+      const subject = /^i/i.test(group(match, 1)) ? 'I' : /^we/i.test(group(match, 1)) ? 'We' : 'They'
       return `${subject} agree`
     },
     wrong: "I'm agree with you.",
@@ -247,7 +259,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'uncountable-s',
     tag: 'uncountable-noun',
     find: new RegExp(`\\b(${UNCOUNTABLE_ALT})\\b`, 'gi'),
-    to: (match) => UNCOUNTABLE[match[1].toLowerCase()] ?? match[1],
+    to: (match) => UNCOUNTABLE[group(match, 1).toLowerCase()] ?? group(match, 1),
     wrong: 'Thank you for the informations.',
     right: 'Thank you for the information.',
     note: 'Substantivos incontáveis não ganham -s em inglês.'
@@ -256,7 +268,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'did-irregular-past',
     tag: 'past-simple',
     find: new RegExp(`\\bdidn'?t\\s+(${IRREGULAR_PAST_ALT})\\b`, 'gi'),
-    to: (match) => `didn't ${PAST_TO_BASE[match[1].toLowerCase()] ?? match[1]}`,
+    to: (match) => `didn't ${PAST_TO_BASE[group(match, 1).toLowerCase()] ?? group(match, 1)}`,
     wrong: "I didn't went there.",
     right: "I didn't go there.",
     note: 'Depois de did/didn’t o verbo volta à forma base: o passado já está no did.'
@@ -265,7 +277,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'did-question-past',
     tag: 'past-simple',
     find: new RegExp(`\\bdid\\s+(?:(you|he|she|it|they|we)\\s+)?(${IRREGULAR_PAST_ALT})\\b`, 'gi'),
-    to: (match) => `did ${match[1] ? `${match[1]} ` : ''}${PAST_TO_BASE[match[2].toLowerCase()] ?? match[2]}`,
+    to: (match) => `did ${match[1] ? `${match[1]} ` : ''}${PAST_TO_BASE[group(match, 2).toLowerCase()] ?? group(match, 2)}`,
     wrong: 'Did you went to the meeting?',
     right: 'Did you go to the meeting?',
     note: 'Em perguntas com did, o verbo principal fica na forma base.'
@@ -274,7 +286,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'have-past-not-participle',
     tag: 'present-perfect',
     find: new RegExp(`\\b(have|has|had)\\s+(${PARTICIPLE_ALT})\\b`, 'gi'),
-    to: (match) => `${match[1]} ${PAST_TO_PARTICIPLE[match[2].toLowerCase()] ?? match[2]}`,
+    to: (match) => `${group(match, 1)} ${PAST_TO_PARTICIPLE[group(match, 2).toLowerCase()] ?? group(match, 2)}`,
     wrong: 'I have went there twice.',
     right: 'I have been there twice.',
     note: 'Present perfect pede particípio, não passado simples.'
@@ -283,7 +295,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'does-third-person',
     tag: 'present-simple',
     find: new RegExp(`\\bdoes\\s+(he|she|it|\\w+)\\s+(${THIRD_PERSON_ALT})\\b`, 'gi'),
-    to: (match) => `does ${match[1]} ${THIRD_PERSON_TO_BASE[match[2].toLowerCase()] ?? match[2]}`,
+    to: (match) => `does ${group(match, 1)} ${THIRD_PERSON_TO_BASE[group(match, 2).toLowerCase()] ?? group(match, 2)}`,
     wrong: 'Does she works here?',
     right: 'Does she work here?',
     note: 'O -s da terceira pessoa já está no does: não repita no verbo principal.'
@@ -292,7 +304,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     id: 'ing-ed-adjective',
     tag: 'participle-adjective',
     find: new RegExp(`\\b(i(?:'m| am))\\s+(${ED_ADJ_ALT})\\b`, 'gi'),
-    to: (match) => `${match[1]} ${ADJECTIVE_TO_ED[match[2].toLowerCase()] ?? match[2]}`,
+    to: (match) => `${group(match, 1)} ${ADJECTIVE_TO_ED[group(match, 2).toLowerCase()] ?? group(match, 2)}`,
     wrong: "I'm boring.",
     right: "I'm bored.",
     note: '-ing descreve a coisa; -ed descreve como você se sente ("I am bored" = estou entediado).'
@@ -302,7 +314,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'articles',
     find:
       /\b(i(?:'m| am)|he(?:'s| is)|she(?:'s| is)|we(?:'re| are)|they(?:'re| are))\s+(developer|programmer|engineer|teacher|student|doctor|nurse|designer|analyst|manager|lawyer|accountant|architect|tester)\b/gi,
-    to: (match) => `${match[1]} ${article(match[2])} ${match[2]}`,
+    to: (match) => `${group(match, 1)} ${article(group(match, 2))} ${group(match, 2)}`,
     wrong: 'I am developer.',
     right: 'I am a developer.',
     note: 'Profissões em inglês levam artigo indefinido (o português omite).'
@@ -312,7 +324,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'comparative',
     find:
       /\bmore\s+(better|bigger|faster|easier|worse|older|younger|cheaper|harder|stronger)\b/gi,
-    to: (match) => match[1],
+    to: (match) => group(match, 1),
     wrong: 'This is more better.',
     right: 'This is better.',
     note: 'Comparativo duplo não existe: ou -er, ou more.'
@@ -331,7 +343,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'double-negative',
     find: /\b(don'?t|doesn'?t|didn'?t)\s+(?:(\w+)\s+)?(nothing|nobody|no one)\b/gi,
     to: (match) =>
-      `${match[1]} ${match[2] ? `${match[2]} ` : ''}${INDEFINITE_TO_ANY[match[3].toLowerCase()] ?? match[3]}`,
+      `${group(match, 1)} ${match[2] ? `${match[2]} ` : ''}${INDEFINITE_TO_ANY[group(match, 3).toLowerCase()] ?? group(match, 3)}`,
     wrong: "I don't know nothing about it.",
     right: "I don't know anything about it.",
     note: 'Dupla negação não existe em inglês: uma só marca de negação.'
@@ -341,7 +353,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'adverb-placement',
     find:
       /\b(i|we|they|you)\s+(go|work|study|practice|eat|speak|travel|arrive)\s+(always|often|never|sometimes|usually)\b/gi,
-    to: (match) => `${match[1]} ${match[3]} ${match[2]}`,
+    to: (match) => `${group(match, 1)} ${group(match, 3)} ${group(match, 2)}`,
     wrong: 'I go often to work.',
     right: 'I often go to work.',
     note: 'Advérbio de frequência fica antes do verbo principal.'
@@ -351,7 +363,7 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
     tag: 'question-word-order',
     find:
       /\b(what|where|when|why|how|who)\s+(you|he|she|it|they|we|this|that)\s+(are|is|do|does|did|can|could|will|would)\b/gi,
-    to: (match) => `${match[1]} ${match[3]} ${match[2]}`,
+    to: (match) => `${group(match, 1)} ${group(match, 3)} ${group(match, 2)}`,
     // M6 (B4): só anota/reescreve em pergunta DIRETA. "I know where he is" é
     // pergunta embutida e gramatical — a regra antiga inseria erro nela.
     guard: directQuestionOnly,
@@ -596,7 +608,7 @@ export const INTERFERENCE_BANKS: InterferenceBankDef[] = [
 ]
 
 function baseLang(code: string): string {
-  return code.toLowerCase().split('-')[0]
+  return code.toLowerCase().split('-')[0] ?? code.toLowerCase()
 }
 
 /** Regras do banco manual para o par nativo→alvo; [] = sem banco (só IA). */

@@ -31,6 +31,12 @@ files:
   - '!**/*.{map,tsbuildinfo}'
   - '!{electron-builder.yml,drizzle.config.ts,electron.vite.config.ts,vitest.config.mts,tsconfig*.json}'
 
+# M6 (F5): auto-update desligado explicitamente. O `latest-linux.yml` gerado
+# no release/ é metadado órfão até o updater apontar para o repositório certo
+# (nadson-silva/babel-break) na v2; sem isto, builds futuros podem herdar um
+# app-update.yml apontando para lugar nenhum.
+publish: null
+
 asar: true
 asarUnpack:
   - node_modules/better-sqlite3/**
@@ -79,10 +85,12 @@ deb:
   artifactName: ${name}-${version}_${arch}.deb
   depends:
     # Electron precisa destes; o Ollama é opcional e externo por design.
-    - libgtk-3-0
+    # M6 (F5): Ubuntu 24.04 renomeou os pacotes para o ABI t64 — a alternativa
+    # mantém o .deb instalável nas duas linhas.
+    - libgtk-3-0t64 | libgtk-3-0
     - libnotify4
     - libnss3
     - libxss1
     - libxtst6
     - xdg-utils
-    - libatspi2.0-0
+    - libatspi2.0-0t64 | libatspi2.0-0

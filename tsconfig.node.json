@@ -4,9 +4,15 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "Bundler",
-    "lib": ["ES2023"],
-    "types": ["node", "electron"],
+    "lib": [
+      "ES2023"
+    ],
+    "types": [
+      "node",
+      "electron"
+    ],
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "skipLibCheck": true,
@@ -22,5 +28,9 @@
     "src/core/**/*.ts",
     "src/preload/**/*.ts",
     "src/shared/**/*.ts"
+  ],
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx"
   ]
 }

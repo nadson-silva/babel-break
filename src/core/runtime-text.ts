@@ -407,19 +407,20 @@ function normalize(code: string | null | undefined): string {
  */
 export function runtimeTemplates(code: string | null | undefined): Templates {
   const wanted = normalize(code)
-  if (DICTIONARIES[wanted]) return DICTIONARIES[wanted]
+  const direct = DICTIONARIES[wanted]
+  if (direct) return direct
 
   const lower = wanted.toLowerCase()
-  if (lower === 'pt' || lower.startsWith('pt-br')) return DICTIONARIES['pt-BR']
+  if (lower === 'pt' || lower.startsWith('pt-br')) return DICTIONARIES['pt-BR'] as Templates
 
-  const base = lower.split('-')[0]
+  const base = lower.split('-')[0] ?? lower
   const exact = Object.keys(DICTIONARIES).find((key) => key.toLowerCase() === base)
-  if (exact) return DICTIONARIES[exact]
+  if (exact) return DICTIONARIES[exact] as Templates
 
   const prefix = Object.keys(DICTIONARIES).find((key) => key.toLowerCase().startsWith(`${base}-`))
-  if (prefix) return DICTIONARIES[prefix]
+  if (prefix) return DICTIONARIES[prefix] as Templates
 
-  return DICTIONARIES.en
+  return DICTIONARIES.en as Templates
 }
 
 export type RuntimeVars = Record<string, string | number>

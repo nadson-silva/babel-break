@@ -531,7 +531,8 @@ export function normalizeTrackPlan(input: {
   const rawLessons = Array.isArray(raw.lessons) ? raw.lessons : []
   const lessons = rawLessons
     .map((lesson, index) => {
-      const fallbackLesson = seed.lessons[index % seed.lessons.length]
+      // M6 (F4): o seed do bucket nunca é vazio; o acessador só ensina ao tsc.
+      const fallbackLesson = seed.lessons[index % seed.lessons.length] ?? seed.lessons[0]!
       const title = (lesson?.title ?? '').trim() || (allowSeedFill ? fallbackLesson.title : '')
       const objective = (lesson?.objective ?? '').trim() || (allowSeedFill ? fallbackLesson.objective : '')
       const vocabulary = (Array.isArray(lesson?.focusVocabulary) ? lesson.focusVocabulary : [])
@@ -596,8 +597,9 @@ export function fallbackTrackPlan(input: { objective: string; level: CefrLevel }
 
 /** Vocabulário-alvo da lição da trilha, já com tradução (fallback local). */
 export function trackTerms(bucket: TrackBucket, index: number): TermSeed[] {
-  const lesson = BUCKETS[bucket].lessons[index % BUCKETS[bucket].lessons.length]
-  return lesson.terms
+  const lessons = BUCKETS[bucket].lessons
+  const lesson = lessons[index % lessons.length] ?? lessons[0]
+  return lesson?.terms ?? []
 }
 
 /** Mesma coisa, mas aceitando a `goalTag` vinda do esboço (IA pode inventar uma). */
@@ -728,7 +730,7 @@ export function levelRangeFrom(level: CefrLevel): string {
 
 function nextName(index: number): CefrLevel {
   const names: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1']
-  return names[Math.min(index + 1, names.length - 1)]
+  return names[Math.min(index + 1, names.length - 1)] ?? 'C1'
 }
 
 function clamp(value: number, min: number, max: number): number {

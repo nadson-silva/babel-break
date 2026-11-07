@@ -35,7 +35,7 @@ const DEFAULT_UI_LANG = 'pt-BR'
 let activeCode = DEFAULT_UI_LANG
 
 export function dictionaryFor(code: string | null | undefined): Dictionary {
-  return DICTIONARIES[(code ?? '').trim()] ?? DICTIONARIES[DEFAULT_UI_LANG]
+  return DICTIONARIES[(code ?? '').trim()] ?? (DICTIONARIES[DEFAULT_UI_LANG] as Dictionary)
 }
 
 /** Idioma atualmente em uso nos textos da interface. */
@@ -73,7 +73,7 @@ export function languageLabel(
   const fromDict = (t.languages.names as Record<string, string | undefined>)[wanted]
   if (fromDict) return fromDict
 
-  const base = wanted.toLowerCase().split('-')[0]
+  const base = wanted.toLowerCase().split('-')[0] ?? ''
   const fromDictBase = (t.languages.names as Record<string, string | undefined>)[base]
   if (fromDictBase) return fromDictBase
 

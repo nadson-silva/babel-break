@@ -87,7 +87,7 @@ function draftOf(
  */
 function scenarioSeed(plan: TrackPlanDraft, index: number) {
   const lesson = plan.lessons[index]
-  const bucket = detectBucket(`${plan.goalTag} ${plan.objective} ${lesson.title}`)
+  const bucket = detectBucket(`${plan.goalTag} ${plan.objective} ${lesson?.title ?? ''}`)
   return { ...fallbackScenario(bucket), source: 'fallback' as const, trackGoalTag: plan.goalTag }
 }
 

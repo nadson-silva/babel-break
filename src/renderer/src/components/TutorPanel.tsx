@@ -135,7 +135,7 @@ export function TutorPanel({
           const turnIndex = previous.findIndex((message) => message.id === event.requestId)
           if (turnIndex === -1) return previous
           for (let index = turnIndex - 1; index >= 0; index -= 1) {
-            if (previous[index].role !== 'user') continue
+            if (previous[index]?.role !== 'user') continue
             return previous.map((message, position) =>
               position === index
                 ? { ...message, corrections: event.corrections ?? [], recast: event.recast }

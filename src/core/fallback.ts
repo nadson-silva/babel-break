@@ -331,7 +331,11 @@ function shuffle<T>(items: T[], seed: number): T[] {
   const copy = [...items]
   for (let index = copy.length - 1; index > 0; index -= 1) {
     const swap = Math.floor(next() * (index + 1))
-    ;[copy[index], copy[swap]] = [copy[swap], copy[index]]
+    const current = copy[index]
+    const other = copy[swap]
+    if (current === undefined || other === undefined) continue
+    copy[index] = other
+    copy[swap] = current
   }
   return copy
 }
@@ -345,7 +349,7 @@ function missingWord(sentence: string): { prompt: string; answer: string } {
   const words = sentence.replace(/[.!?]+$/, '').split(/\s+/).filter(Boolean)
   if (words.length < 2) return { prompt: sentence, answer: words[0] ?? sentence }
   const index = Math.max(0, words.length - 1)
-  const answer = words[index]
+  const answer = words[index] ?? sentence
   const prompt = words.map((word, position) => (position === index ? '___' : word)).join(' ') + '.'
   return { prompt, answer }
 }
@@ -415,13 +419,19 @@ export function fallbackExercises(
   if (!first || vocab.length === 0) return { exercises: [] }
 
   const focus = focusEntries(errors)
-  const second = content.examples[1] ?? content.examples[0]
+  const second = content.examples[1] ?? first
   const cloze = vocabCloze(content.vocabulary, locale) ?? missingWord(first.target)
   const orderTokens = tokenizeFor(second.target, locale.target.code)
 
   // M6 (B12): seed derivada da lição — a mesma lição sempre baralha do mesmo
   // jeito (pré-geração e abertura não produzem dois baralhos diferentes).
-  const pick = (index: number) => vocab[index % vocab.length]
+  // M6 (F4): `noUncheckedIndexedAccess` — o guarda acima garante não-vazio;
+  // o acessador torna isso checável pelo compilador em cada índice.
+  const pick = (index: number) => {
+    const item = vocab[index % vocab.length]
+    if (!item) throw new Error('fallbackExercises: vocabulário vazio')
+    return item
+  }
   const seed = hashSeed(`${content.title}|${content.objective}`)
 
   const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))], seed)
@@ -434,14 +444,14 @@ export function fallbackExercises(
     {
       type: 'multiple_choice',
       instruction: runtimeTextForLocale(locale, 'fb.mcTranslation.instruction'),
-      prompt: runtimeTextForLocale(locale, 'fb.mcTranslation.prompt', { term: vocab[0].term }),
+      prompt: runtimeTextForLocale(locale, 'fb.mcTranslation.prompt', { term: pick(0).term }),
       options: optionsA,
       tokens: [],
-      answer: vocab[0].translation,
+      answer: pick(0).translation,
       alternatives: [],
       explanation: runtimeTextForLocale(locale, 'fb.mcTranslation.explanation', {
-        term: vocab[0].term,
-        translation: vocab[0].translation
+        term: pick(0).term,
+        translation: pick(0).translation
       }),
       targetTags: []
     },

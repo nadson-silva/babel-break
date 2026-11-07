@@ -1348,6 +1348,7 @@ function normalizeLangCode(value: string | null | undefined): string | null {
   const trimmed = (value ?? '').trim()
   if (!/^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/.test(trimmed)) return null
   const [base, region] = trimmed.split('-')
+  if (!base) return null
   return region ? `${base.toLowerCase()}-${region.toUpperCase()}` : base.toLowerCase()
 }
 

@@ -450,7 +450,7 @@ export async function finishScenarioRun(
         feedback: feedbackText,
         bestPhrases,
         followUpDrill,
-        criteria: scenario.successCriteria.map((criterion, index) => ({ criterion, met: criteriaMet[index] })),
+        criteria: scenario.successCriteria.map((criterion, index) => ({ criterion, met: criteriaMet[index] ?? false })),
         cardsCreated,
         levelChange: recap.levelChange,
         source
@@ -472,7 +472,7 @@ export async function finishScenarioRun(
     feedback: feedbackText,
     bestPhrases,
     followUpDrill,
-    criteria: scenario.successCriteria.map((criterion, index) => ({ criterion, met: criteriaMet[index] })),
+    criteria: scenario.successCriteria.map((criterion, index) => ({ criterion, met: criteriaMet[index] ?? false })),
     cardsCreated,
     levelChange: recap.levelChange,
     source

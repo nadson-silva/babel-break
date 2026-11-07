@@ -45,7 +45,7 @@ export function ReportButton({
   onReported
 }: ReportButtonProps): JSX.Element {
   const [open, setOpen] = useState(false)
-  const [reason, setReason] = useState<ReportReason>(REASONS_BY_KIND[kind][0])
+  const [reason, setReason] = useState<ReportReason>(REASONS_BY_KIND[kind][0] ?? 'other')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
