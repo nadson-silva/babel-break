@@ -1,4 +1,4 @@
-import { integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
 export const profiles = sqliteTable('profiles', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -66,14 +66,24 @@ export const lessons = sqliteTable('lessons', {
   createdAt: integer('created_at').notNull()
 })
 
-export const lessonItems = sqliteTable('lesson_items', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  lessonId: integer('lesson_id').notNull(),
-  kind: text('kind').notNull(),
-  payload: text('payload').notNull()
-})
+// M6 (C5/C6): índice no caminho quente + FK com cascade — apagar a lição não
+// deixa itens órfãos (e export/import da v2 não exporta perfil corrompido).
+export const lessonItems = sqliteTable(
+  'lesson_items',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    lessonId: integer('lesson_id')
+      .notNull()
+      .references(() => lessons.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    payload: text('payload').notNull()
+  },
+  (t) => [index('lesson_items_lesson_idx').on(t.lessonId)]
+)
 
-export const exercises = sqliteTable('exercises', {
+export const exercises = sqliteTable(
+  'exercises',
+  {
   id: integer('id').primaryKey({ autoIncrement: true }),
   lessonId: integer('lesson_id').notNull(),
   type: text('type').notNull(),
@@ -86,15 +96,24 @@ export const exercises = sqliteTable('exercises', {
   createdAt: integer('created_at').notNull()
 })
 
-export const attempts = sqliteTable('attempts', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  exerciseId: integer('exercise_id').notNull(),
+export const attempts = sqliteTable(
+  'attempts',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    // M6 (C6): apagar exercício sem cascade deixava tentativa órfã
+    // (`delete attempts` manual no learning sumiu com a correção).
+    exerciseId: integer('exercise_id')
+      .notNull()
+      .references(() => exercises.id, { onDelete: 'cascade' }),
   response: text('response').notNull(),
   correct: integer('correct', { mode: 'boolean' }).notNull(),
   score: real('score'),
   latencyMs: integer('latency_ms'),
   createdAt: integer('created_at').notNull()
-})
+  },
+  // M6 (C5): histórico por exercício (relatório do aluno, agregações do painel).
+  (t) => [index('attempts_exercise_idx').on(t.exerciseId)]
+)
 
 export const errors = sqliteTable('errors', {
   id: integer('id').primaryKey({ autoIncrement: true }),
@@ -146,12 +165,20 @@ export const cards = sqliteTable(
   (t) => [uniqueIndex('cards_profile_dedupe_idx').on(t.profileId, t.dedupeKey)]
 )
 
-export const reviews = sqliteTable('reviews', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  cardId: integer('card_id').notNull(),
-  rating: integer('rating').notNull(),
-  reviewedAt: integer('reviewed_at').notNull()
-})
+export const reviews = sqliteTable(
+  'reviews',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    // M6 (C6): reviews só existem para card vivo.
+    cardId: integer('card_id')
+      .notNull()
+      .references(() => cards.id, { onDelete: 'cascade' }),
+    rating: integer('rating').notNull(),
+    reviewedAt: integer('reviewed_at').notNull()
+  },
+  // M6 (C5/C9): agregação de retenção do painel sem varrer a tabela toda.
+  (t) => [index('reviews_card_idx').on(t.cardId), index('reviews_time_idx').on(t.reviewedAt)]
+)
 
 export const lessonProgress = sqliteTable(
   'lesson_progress',
@@ -188,15 +215,23 @@ export const conversations = sqliteTable('conversations', {
   closedAt: integer('closed_at')
 })
 
-export const messages = sqliteTable('messages', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  conversationId: integer('conversation_id').notNull(),
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    // M6 (C6): conversa apagada leva as mensagens (era órfão eterno).
+    conversationId: integer('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
   role: text('role').notNull(),
   content: text('content').notNull(),
   /** Correções inline da mensagem do aluno (JSON de Correction[]). */
-  corrections: text('corrections'),
-  createdAt: integer('created_at').notNull()
-})
+    corrections: text('corrections'),
+    createdAt: integer('created_at').notNull()
+  },
+  // M6 (C5): fechamento/recap e leitura de janela buscam por conversa.
+  (t) => [index('messages_conversation_idx').on(t.conversationId)]
+)
 
 export const focusTracks = sqliteTable('focus_tracks', {
   id: integer('id').primaryKey({ autoIncrement: true }),

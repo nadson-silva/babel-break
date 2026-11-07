@@ -40,10 +40,12 @@ export function recordCorrections(
 ): number {
   if (corrections.length === 0) return 0
 
-  const db = getDb()
   const now = Date.now()
   let recorded = 0
 
+  // M6 (C7): o caderno inteiro é uma escrita só — meio registro gravado e meio
+  // não não pode existir.
+  return getDb().transaction((db) => {
   for (const correction of corrections) {
     const tag = normalizeTag(correction.tag)
     const original = correction.original.trim()
@@ -99,7 +101,8 @@ export function recordCorrections(
     recorded += 1
   }
 
-  return recorded
+    return recorded
+  })
 }
 
 function rowsToNotebookRows(rows: ErrorRow[]): NotebookRow[] {

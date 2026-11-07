@@ -23,6 +23,10 @@ import { effectFor, isReportKind, isReportReason, reasonFor, snapshotText } from
 import { normalizeTag } from './notebook'
 import { getDb, getDefaultProfile, schema } from './db'
 
+// M6 (C7): as rotinas de escrita aceitam o handle do banco OU uma transação.
+type DbHandle = ReturnType<typeof getDb>
+type TxHandle = Parameters<Parameters<DbHandle['transaction']>[0]>[0]
+
 type ReportRow = typeof schema.contentReports.$inferSelect
 
 interface Context {
@@ -172,12 +176,15 @@ function toView(row: ReportRow): ReportItemView {
 }
 
 /** Aplica o efeito do report no banco. Retorna o efeito realmente aplicado. */
-function applyEffect(input: ReportInput, targetId: number | null): ReportItemView['effect'] {
+function applyEffect(
+  input: ReportInput,
+  targetId: number | null,
+  db: DbHandle | TxHandle = getDb()
+): ReportItemView['effect'] {
   const declared = effectFor(input.kind)
   if (declared === 'logged') return 'logged'
   if (!targetExists(input.kind, targetId)) return 'logged'
 
-  const db = getDb()
   const stamp = now()
 
   if (input.kind === 'exercise') {
@@ -225,7 +232,6 @@ export function submitReport(input: ReportInput): ReportItemView {
     explicit ??
     (input.kind === 'correction' ? resolveCorrectionErrorId(input.context?.tag, input.context?.text) : null)
   const reason = isReportReason(input.reason) ? input.reason : reasonFor(input.kind, input.reason)
-  const effect = applyEffect({ ...input, reason }, targetId)
 
   const context: Context = {
     text: snapshotText(input.context?.text) ?? undefined,
@@ -233,21 +239,27 @@ export function submitReport(input: ReportInput): ReportItemView {
     tag: snapshotText(input.context?.tag, 60) ?? undefined
   }
 
-  const row = getDb()
-    .insert(schema.contentReports)
-    .values({
-      profileId: profile.id,
-      kind: input.kind,
-      targetId,
-      reason,
-      effect,
-      note: snapshotText(input.note, 600) ?? null,
-      context: Object.values(context).some(Boolean) ? JSON.stringify(context) : null,
-      targetLabel: snapshotText(labelForTarget(input.kind, targetId), 160) ?? null,
-      createdAt: now()
-    })
-    .returning()
-    .get()
+  // M6 (C7): efeito + registro numa transação só. Antes, uma falha entre os
+  // dois deixava exercício bloqueado SEM report gravado — estado não-annulável.
+  const row = getDb().transaction((tx) => {
+    const effect = applyEffect({ ...input, reason }, targetId, tx)
+
+    return tx
+      .insert(schema.contentReports)
+      .values({
+        profileId: profile.id,
+        kind: input.kind,
+        targetId,
+        reason,
+        effect,
+        note: snapshotText(input.note, 600) ?? null,
+        context: Object.values(context).some(Boolean) ? JSON.stringify(context) : null,
+        targetLabel: snapshotText(labelForTarget(input.kind, targetId), 160) ?? null,
+        createdAt: now()
+      })
+      .returning()
+      .get()
+  })
 
   return toView(row)
 }
@@ -265,25 +277,28 @@ export function undoReport(reportId: number, profileId = getDefaultProfile().id)
   if (report.undoneAt != null) return toView(report)
 
   const stamp = now()
-  db.update(schema.contentReports)
-    .set({ undoneAt: stamp })
-    .where(eq(schema.contentReports.id, reportId))
-    .run()
-
   const kind = report.kind as ReportInput['kind']
   const targetId = report.targetId
 
-  if (stillReported(kind, targetId, reportId)) return toView({ ...report, undoneAt: stamp })
+  // M6 (C7): marcar como desfeito e reabrir o alvo são um só passo atômico.
+  db.transaction((tx) => {
+    tx.update(schema.contentReports)
+      .set({ undoneAt: stamp })
+      .where(eq(schema.contentReports.id, reportId))
+      .run()
 
-  if (kind === 'exercise' && targetId != null) {
-    db.update(schema.exercises).set({ blocked: false }).where(eq(schema.exercises.id, targetId)).run()
-  }
-  if (kind === 'lesson_content' && targetId != null) {
-    db.update(schema.lessons).set({ staleAt: null }).where(eq(schema.lessons.id, targetId)).run()
-  }
-  if (kind === 'correction' && targetId != null) {
-    db.update(schema.errors).set({ disputedAt: null }).where(eq(schema.errors.id, targetId)).run()
-  }
+    if (stillReported(kind, targetId, reportId)) return
+
+    if (kind === 'exercise' && targetId != null) {
+      tx.update(schema.exercises).set({ blocked: false }).where(eq(schema.exercises.id, targetId)).run()
+    }
+    if (kind === 'lesson_content' && targetId != null) {
+      tx.update(schema.lessons).set({ staleAt: null }).where(eq(schema.lessons.id, targetId)).run()
+    }
+    if (kind === 'correction' && targetId != null) {
+      tx.update(schema.errors).set({ disputedAt: null }).where(eq(schema.errors.id, targetId)).run()
+    }
+  })
 
   return toView({ ...report, undoneAt: stamp })
 }

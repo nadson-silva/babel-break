@@ -797,32 +797,36 @@ export function closeConversation(
 
   const recap = buildRecap(profileId, corrections, extra)
 
-  db.update(schema.conversations)
-    .set({ closedAt: now })
-    .where(and(eq(schema.conversations.id, conversationId), isNull(schema.conversations.closedAt)))
-    .run()
+  // M6 (C7): fechar a conversa e encerrar a sessão de estudo dela são um passo
+  // só — meio caminho deixaria sessão aberta eterna (tempo fantasma no painel).
+  db.transaction((tx) => {
+    tx.update(schema.conversations)
+      .set({ closedAt: now })
+      .where(and(eq(schema.conversations.id, conversationId), isNull(schema.conversations.closedAt)))
+      .run()
+
+    tx.update(schema.studySessions)
+      .set({
+        endedAt: now,
+        summary: JSON.stringify({
+          conversationId,
+          corrections: corrections.length,
+          tags: recap.tags,
+          cardsCreated: recap.cardsCreated
+        })
+      })
+      .where(
+        and(
+          eq(schema.studySessions.profileId, profileId),
+          eq(schema.studySessions.kind, 'conversation'),
+          isNull(schema.studySessions.endedAt),
+          sql`json_extract(${schema.studySessions.summary}, '$.conversationId') = ${conversationId}`
+        )
+      )
+      .run()
+  })
 
   emitStudentEvent('conversation-closed', String(conversationId))
-
-  db.update(schema.studySessions)
-    .set({
-      endedAt: now,
-      summary: JSON.stringify({
-        conversationId,
-        corrections: corrections.length,
-        tags: recap.tags,
-        cardsCreated: recap.cardsCreated
-      })
-    })
-    .where(
-      and(
-        eq(schema.studySessions.profileId, profileId),
-        eq(schema.studySessions.kind, 'conversation'),
-        isNull(schema.studySessions.endedAt),
-        sql`json_extract(${schema.studySessions.summary}, '$.conversationId') = ${conversationId}`
-      )
-    )
-    .run()
 
   return recap
 }
