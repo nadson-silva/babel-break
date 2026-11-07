@@ -103,34 +103,39 @@ API). Sem sessão diária, streak ou meta obrigatória — você estuda quando q
       rótulos de intervalo do FSRS, cards, motivo da sugestão, erros de geração) agora sai
       no idioma das explicações do perfil — sem dicionário para o idioma, cai em inglês
 
-Próximo: **M6 (pré-v2)** — rede de proteção, bugs do loop e dívidas de contrato; depois a v2 —
-voz (TTS + pronúncia), múltiplos perfis, export/import.
+**M6 (pré-v2) aplicada em 2026-11-07** — rede de proteção (boot com recuperação de banco,
+log rotativo, ErrorBoundary, CI com gate de eval), bugs do loop (fila de revisão, fechamento de
+conversa, mutex de geração, timeout/backoff em toda chamada de IA), contratos versionados
+(`promptVersion`/`schemaVersion`, zod nos 57 canais IPC, FK + índices). Pendências honestas
+registradas no [PLAN §12](./PLAN.md). Próximo: **v2** — voz (TTS + pronúncia), múltiplos perfis,
+export/import.
 
-## Débito conhecido antes da v2
+## Rede de proteção da M6 (auditoria → correção)
 
-A auditoria de 2026-11-07 (M5 concluído, commit `d3eac37`) abriu o milestone **M6 — pré-v2** com
-o checklist completo em [PLAN.md §12](./PLAN.md). Os itens visíveis para quem usa o app hoje:
+A auditoria de 2026-11-07 abriu o milestone **M6 — pré-v2** e o checklist completo (com o que
+ficou para a v2) vive em [PLAN.md §12](./PLAN.md). O que a M6 consertou, visível para quem usa:
 
-- a fila de revisão **pula cards**: o componente avança o índice e a tela também remove o card da
-  fila (`ReviewQueue.tsx:73` + os 4 consumidores) — os cards alternados nunca aparecem;
-- fechar uma conversa pode **encerrar a sessão de estudo de outra** (`tutor.ts:766-784` não filtra
-  por `conversationId`);
-- "Encerrar sessão" na sessão guiada **não abandona** a sessão, que volta a ser oferecida na home;
-- o banco de interferência PT-BR→inglês tem regras que **casam frases corretas**: "I know where he
-  is" sai "corrigido" para "I know where is he" (`interference.ts:334-342`);
-- nenhum request de IA tem **timeout**: um request pendurado trava a pré-geração até reiniciar o
-  app (`ai.ts:83-99` não volta a zerar o contador de requisições em voo);
-- conteúdo em cache **não tem versão de schema/prompt** — renomear um campo em v2 apodrece o banco
-  de quem já usa (o `en/pt → target/native` do M4 foi remendado com shim);
-- falha de pré-condição no chat deixa o **"Pensando…" permanente** (o `tutor:send` não checa o
-  resultado);
-- sem CI, sem lint, sem `LICENSE`; e `scripts/eval.mjs` **divergiu dos contratos reais** e pontua
-  alucinação como sucesso: uma frase correta com `expect: ''` falha quando o modelo acertadamente
-  não corrige nada (`eval.mjs:626`).
+- a fila de revisão não pula mais cards (o índice interno do `ReviewQueue` saiu de cena; o
+  array da tela é a fonte da verdade — com teste de interação dos 4 consumidores);
+- fechar uma conversa **não** encerra a sessão de outra, e o fechamento é idempotente (um
+  fechamento, um recap — sem dupla reestimativa de nível);
+- "Encerrar sessão" abandona a sessão guiada de verdade;
+- "I know where he is" não é mais "corrigida" para "I know where is he" (a regra de inversão só
+  pega pergunta direta), e todo o banco passou por testes de falso positivo;
+- toda chamada de IA tem deadline (`AbortSignal.timeout`), streaming conta no `aiInFlight`
+  (a pré-geração para de competir com o aluno) e 429 não é mais retentado;
+- conteúdo em cache é carimbado com `promptVersion`/`schemaVersion` — versão divergente vira
+  `stale` e regenera (o shim do M4 foi removido);
+- falha de envio no chat mostra o erro na bolha em vez de deixar "Pensando…" eterno;
+- banco corrompido produz **tela de recuperação com backup** (quarentena em
+  `userData/recovery/` + snapshot pré-migração em `userData/backups/`), nunca app sem janela;
+- `main.log` rotativo em userData + `npm run eval` com exit code no CI; zod nos 57 canais IPC
+  (payload inválido é recusado antes de tocar no disco); `LICENSE`, `CHANGELOG.md` e `lint`
+  existem.
 
-O que a auditoria confirmou estar sólido, e que a M6 preserva: typecheck limpo, 240 testes, zero
-`any`, migrações aditivas, `contextIsolation`, e a degradação honesta quando não há IA para o
-idioma-alvo.
+O que a auditoria confirmou estar sólido, e que a M6 preservou: typecheck limpo (agora com
+`noUncheckedIndexedAccess` no runtime), migrações aditivas (0000–0006), zero `any`,
+`contextIsolation`, e a degradação honesta quando não há IA para o idioma-alvo.
 
 ## Requisitos
 
@@ -180,9 +185,15 @@ GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash
 node scripts/eval.mjs --ollama gemma4:12b --lang es
 node scripts/eval.mjs --ollama gemma4:12b --lang ja   # escrita CJK
 node scripts/eval.mjs --ollama gemma4:12b --lang ar   # escrita RTL
-node scripts/eval.mjs --offline                       # linha de base sem IA (npm test)
+npm run eval -- --offline                             # linha de base sem IA (npm test) — é o passo do CI
 node scripts/eval.mjs --ollama gemma4:12b --n 5       # só as 5 primeiras tarefas
 ```
+
+M6 (F1/F2): os contratos avaliados são os REAIS — o harness compila `src/core` em memória e
+usa os mesmos prompts/schemas/banco do app; goldens de PT→EN e PT→ES saem do próprio banco
+(cada forma correta é um caso "sem correção" — alucinação falha no gate). Sai JSON por run em
+`eval-results/` + `history.json`, e o exit code é != 0 se contrato/acurácia/anti-alucinação
+estourarem (`--min-accuracy`).
 
 Além de JSON inválido, contrato e latência, o harness mede **acurácia de correção**
 (pegou a tag esperada? a forma esperada?) e **escrita** (o texto do idioma-alvo veio em
