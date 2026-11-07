@@ -9,6 +9,7 @@
 import { Rating, State, createEmptyCard, fsrs, type Card, type Grade } from 'ts-fsrs'
 import type { PromptLocale } from './languages'
 import { DEFAULT_LOCALE } from './prompts'
+import { runtimeTextForLocale, localizeDecimal, runtimeText } from './runtime-text'
 
 export type CardKind = 'vocab' | 'phrase' | 'error'
 
@@ -51,7 +52,9 @@ export function vocabCard(
     kind: 'vocab',
     front: cloze?.blanked ?? `${item.term} — ${item.translation}`,
     back: `${item.term} · ${item.translation}${cloze ? `\n${item.example}` : ''}`,
-    hint: cloze ? clozeHint(item.translation) : `Diga o termo em ${locale.targetName}.`,
+    hint: cloze
+      ? clozeHint(item.translation, locale)
+      : runtimeTextForLocale(locale, 'card.vocabHint', { target: locale.targetName }),
     term: item.term,
     translation: item.translation,
     example: item.example,
@@ -64,8 +67,8 @@ export function vocabCard(
  * "It is a ___ situation" aceita dezenas de respostas. A dica de sempre é a
  * tradução do termo.
  */
-function clozeHint(translation: string): string {
-  return `Complete a frase com a palavra que significa “${translation}”.`
+function clozeHint(translation: string, locale: PromptLocale = DEFAULT_LOCALE): string {
+  return runtimeTextForLocale(locale, 'card.clozeHint', { translation })
 }
 
 /**
@@ -74,9 +77,9 @@ function clozeHint(translation: string): string {
  * Re-derivamos da tradução salva no payload para corrigir também a fila legada,
  * sem migração de banco.
  */
-export function cardHint(payload: CardPayload): string | undefined {
+export function cardHint(payload: CardPayload, locale: PromptLocale = DEFAULT_LOCALE): string | undefined {
   if (payload.kind === 'vocab' && payload.front.includes('___') && payload.translation) {
-    return clozeHint(payload.translation)
+    return clozeHint(payload.translation, locale)
   }
   return payload.hint
 }
@@ -89,9 +92,12 @@ export function phraseCard(
 ): CardPayload {
   return {
     kind: 'phrase',
-    front: `Traduza para o ${locale.targetName}: ${translation}`,
+    front: runtimeTextForLocale(locale, 'card.phraseFront', {
+      target: locale.targetName,
+      native: translation
+    }),
     back: example,
-    hint: `Fale ou escreva a frase em ${locale.targetName} antes de virar o card.`,
+    hint: runtimeTextForLocale(locale, 'card.phraseHint', { target: locale.targetName }),
     lessonId
   }
 }
@@ -107,9 +113,9 @@ export function errorCard(
 ): CardPayload {
   return {
     kind: 'error',
-    front: `Corrija a frase: “${error.original}”`,
+    front: runtimeTextForLocale(locale, 'card.errorFront', { original: error.original }),
     back: `${error.corrected}${error.note ? `\n\n${error.note}` : ''}`,
-    hint: `Diga a versão correta em ${locale.targetName} antes de virar o card.`,
+    hint: runtimeTextForLocale(locale, 'card.errorHint', { target: locale.targetName }),
     tag: error.tag
   }
 }
@@ -279,7 +285,11 @@ export interface IntervalPreview {
  * Prévia dos quatro botões ("10 min", "4 dias"), para o aluno decidir
  * com informação. Não grava nada.
  */
-export function previewIntervals(json: string | null | undefined, now = new Date()): IntervalPreview[] {
+export function previewIntervals(
+  json: string | null | undefined,
+  now = new Date(),
+  lang: string | null | undefined = 'pt-BR'
+): IntervalPreview[] {
   const card = parseSchedule(json, now)
 
   try {
@@ -288,35 +298,59 @@ export function previewIntervals(json: string | null | undefined, now = new Date
     return (['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => {
       const next = preview[RATING_BY_REVIEW[rating]].card
       const minutes = Math.max(0, Math.round((next.due.getTime() - now.getTime()) / 60000))
-      return { rating, label: formatInterval(minutes), minutes }
+      return { rating, label: formatInterval(minutes, lang), minutes }
     })
   } catch {
     return [
-      { rating: 'again', label: 'de novo', minutes: 600 },
-      { rating: 'hard', label: 'difícil', minutes: 1440 },
-      { rating: 'good', label: 'bom', minutes: 8640 },
-      { rating: 'easy', label: 'fácil', minutes: 17280 }
+      { rating: 'again', label: runtimeText(lang, 'rating.again'), minutes: 600 },
+      { rating: 'hard', label: runtimeText(lang, 'rating.hard'), minutes: 1440 },
+      { rating: 'good', label: runtimeText(lang, 'rating.good'), minutes: 8640 },
+      { rating: 'easy', label: runtimeText(lang, 'rating.easy'), minutes: 17280 }
     ]
   }
 }
 
-function formatInterval(minutes: number): string {
-  if (minutes < 60) return `${Math.max(1, minutes)} min`
-  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h`
+/** Tempo até a próxima revisão em unidades curtas ('4 d', '2 h'), no idioma do aluno. */
+export function formatInterval(minutes: number, lang: string | null | undefined = 'pt-BR'): string {
+  if (minutes < 60) return runtimeText(lang, 'unit.minutes', { value: Math.max(1, minutes) })
+  if (minutes < 24 * 60) return runtimeText(lang, 'unit.hours', { value: Math.round(minutes / 60) })
   const days = Math.round(minutes / (24 * 60))
-  if (days < 31) return `${days} d`
+  if (days < 31) return runtimeText(lang, 'unit.days', { value: days })
   const months = Math.round(days / 30)
-  if (months < 12) return `${months} mo`
-  return `${(days / 365).toFixed(1).replace('.', ',')} a`
+  if (months < 12) return runtimeText(lang, 'unit.months', { value: months })
+  return runtimeText(lang, 'unit.years', {
+    value: localizeDecimal((days / 365).toFixed(1), lang)
+  })
 }
 
 /** Texto curto de quando o card vence, para a lista de revisão. */
-export function dueLabel(due: number, now = Date.now()): string {
+export function dueLabel(due: number, now = Date.now(), lang: string | null | undefined = 'pt-BR'): string {
   const minutes = Math.round((due - now) / 60000)
-  if (minutes <= 0) return 'agora'
-  if (minutes < 60) return `em ${minutes} min`
-  if (minutes < 24 * 60) return `em ${Math.round(minutes / 60)} h`
+  if (minutes <= 0) return runtimeText(lang, 'due.now')
+  if (minutes < 60) return relative(lang, runtimeText(lang, 'unit.minutes', { value: minutes }))
+  if (minutes < 24 * 60) return relative(lang, runtimeText(lang, 'unit.hours', { value: Math.round(minutes / 60) }))
   const days = Math.round(minutes / (24 * 60))
-  if (days < 31) return `em ${days} d`
-  return `em ${Math.round(days / 30)} mo`
+  if (days < 31) return relative(lang, runtimeText(lang, 'unit.days', { value: days }))
+  return relative(lang, runtimeText(lang, 'unit.months', { value: Math.round(days / 30) }))
+}
+
+function relative(lang: string | null | undefined, value: string): string {
+  return runtimeText(lang, 'due.relative', { value })
+}
+
+/**
+ * Retenção estimada do card agora (curva de esquecimento do FSRS), usada pelo
+ * painel de Progresso. Card novo não tem curva: devolve null, não 0%.
+ */
+export function cardRetention(json: string | null | undefined, now = new Date()): number | null {
+  const card = parseSchedule(json, now)
+  if (card.state === State.New || card.reps === 0 || !card.stability) return null
+  if (!card.last_review) return null
+
+  try {
+    const value = scheduler.retrievability(card, now)
+    return Number.isFinite(value) && value > 0 ? Math.min(1, Math.max(0, value)) : null
+  } catch {
+    return null
+  }
 }

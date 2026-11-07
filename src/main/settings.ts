@@ -9,7 +9,9 @@ const DEFAULTS: AppSettings = {
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   correctionStyle: 'both',
   focusMix: 0.3,
-  uiLang: 'pt-BR'
+  uiLang: 'pt-BR',
+  // M5: aquecer o próximo conteúdo provável quando o app está ocioso.
+  pregenerate: true
 }
 
 const SETTINGS_KEY = 'settings'

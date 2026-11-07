@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { and, asc, desc, eq, inArray } from 'drizzle-orm'
+import { and, asc, count, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import type {
   CefrLevel,
   Correction,
@@ -54,6 +54,8 @@ import {
 } from '../core/schemas'
 import { generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
+import { emitStudentEvent } from './events'
+import { runtimeText } from '../core/runtime-text'
 import { errorHints, focusFor, recordCorrections } from './notebook'
 import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors } from './review'
 import { ownerOfLesson, openTrackLessons, trackContextOf, type LessonOwner } from './tracks'
@@ -340,8 +342,9 @@ export function generateCurriculum(): Promise<CurriculumView> {
     } catch (error) {
       if (!deterministicContentSupported(profile.targetLang)) {
         throw new Error(
-          `A IA está indisponível e o plano de currículo offline só cobre inglês. ` +
-            `Para montar um currículo de ${locale.targetName}, configure um provedor em Configurações.`
+          runtimeText(profile.nativeLang, 'error.aiUnavailableCurriculum', {
+            target: locale.targetName
+          })
         )
       }
       console.warn(
@@ -421,7 +424,7 @@ function progressOf(profileId: number, lessonId: number): ProgressRow | undefine
     .get()
 }
 
-function exercisePayload(row: ExerciseRow): ExercisePayload {
+function exercisePayload(row: { payload: string }): ExercisePayload {
   return (
     parseJson<ExercisePayload>(row.payload) ?? {
       instruction: '',
@@ -446,12 +449,30 @@ function toExerciseView(row: ExerciseRow): ExerciseView {
   }
 }
 
+/**
+ * Garante que a lição tenha conteúdo + exercícios, **usando o cache primeiro**
+ * (M5: lição já gerada abre sem IA e sem gastar token).
+ *
+ * Caminhos que a função conhece:
+ * - conteúdo salvo e não marcado como ruim → não gera nada;
+ * - conteúdo marcado como ruim (`lessons.staleAt`, pelo botão de reportar) →
+ *   regenera; se a IA estiver fora, mantém o cache em vez de piorar a lição;
+ * - exercícios reportados como ruins ficam `blocked`: saem da prática e da
+ *   contagem, mas continuam no banco (o histórico de tentativas e o report
+ *   apontam para eles) e são repostos por itens novos, sem descartar os bons.
+ */
 async function ensureLessonGenerated(
   lesson: LessonRow,
   profile: ProfileRow,
   owner: LessonOwner,
-  /** Recria os exercícios mesmo com o bloco antigo salvo (pedido do aluno na lição). */
-  options: { forceExercises?: boolean } = {}
+  options: {
+    /** Recria o bloco de exercícios inteiro (pedido do aluno na lição). */
+    forceExercises?: boolean
+    /** M5: veio do aquecimento ocioso — marca a lição como pré-gerada. */
+    prewarm?: boolean
+    /** M5: mínimo de exercícios utilizáveis; abaixo disso a fila só repõe o que falta. */
+    minExercises?: number
+  } = {}
 ): Promise<ErrorFocusEntry[]> {
   const db = getDb()
   const level = toCefr(lesson.level)
@@ -460,8 +481,9 @@ async function ensureLessonGenerated(
   const scopeTitle = owner.trackTitle ?? owner.unitTitle ?? ''
   const locale = promptLocale(profile.targetLang, profile.nativeLang)
   const offlineReady = deterministicContentSupported(profile.targetLang)
+  const minExercises = options.minExercises ?? 1
 
-  let content = readLessonContent(lesson.content)
+  let content = lesson.staleAt != null ? null : readLessonContent(lesson.content)
 
   if (!content) {
     const hints = recentErrorHints(profile.id)
@@ -476,65 +498,83 @@ async function ensureLessonGenerated(
       track: track ? { title: track.title, vocabulary: track.vocabulary } : null
     })
 
-    let generated: LessonContentOutput
-    let source: 'ai' | 'fallback'
+    let resolved: LessonContentView | null = null
 
     try {
-      generated = await generateStructured(lessonContentSchema, {
+      const generated = await generateStructured(lessonContentSchema, {
         system: prompt.system,
         user: prompt.user,
         temperature: 0.4
       })
-      source = 'ai'
+      // O nível é do currículo/trilha — um modelo fraco não rebaixa nem promove a lição.
+      resolved = {
+        ...generated,
+        level,
+        pitfalls: generated.pitfalls ?? pitfallsFrom(focus),
+        source: 'ai'
+      }
     } catch (error) {
-      if (!offlineReady) {
+      const previous = readLessonContent(lesson.content)
+
+      if (previous) {
+        // Cache é melhor que nada: sem IA não regeneramos (e não deixamos a
+        // lição pedindo para sempre), mas limparamos a marca de "ruim".
+        db.update(schema.lessons).set({ staleAt: null }).where(eq(schema.lessons.id, lesson.id)).run()
+        content = previous
+      } else if (offlineReady) {
+        console.warn(
+          '[learning] geração do conteúdo falhou, usando conteúdo determinístico:',
+          error instanceof Error ? error.message : error
+        )
+        resolved = {
+          ...fallbackLessonContent({
+            title: lesson.title,
+            objective: lesson.objective ?? lesson.title,
+            level,
+            errors: focus,
+            vocabulary: track ? fallbackTrackVocabulary(track.goalTag, lesson.position) : undefined
+          }),
+          level,
+          pitfalls: pitfallsFrom(focus),
+          source: 'fallback'
+        }
+      } else {
         throw new Error(
-          `A IA está indisponível e o gerador offline só cobre inglês (o idioma-fixture do app). ` +
-            `Para gerar conteúdo de ${locale.targetName}, configure um provedor em Configurações.`
+          runtimeText(profile.nativeLang, 'error.aiUnavailableContent', { target: locale.targetName })
         )
       }
-      console.warn(
-        '[learning] geração do conteúdo falhou, usando conteúdo determinístico:',
-        error instanceof Error ? error.message : error
-      )
-      generated = fallbackLessonContent({
-        title: lesson.title,
-        objective: lesson.objective ?? lesson.title,
-        level,
-        errors: focus,
-        vocabulary: track ? fallbackTrackVocabulary(track.goalTag, lesson.position) : undefined
+    }
+
+    if (resolved) {
+      content = resolved
+      const stamp = Date.now()
+
+      db.transaction((tx) => {
+        tx.update(schema.lessons)
+          .set({
+            content: JSON.stringify(resolved as LessonContentView),
+            level: (resolved as LessonContentView).level,
+            version: lesson.version + 1,
+            staleAt: null,
+            ...(options.prewarm ? { prewarmedAt: stamp } : {})
+          })
+          .where(eq(schema.lessons.id, lesson.id))
+          .run()
+
+        tx.delete(schema.lessonItems).where(eq(schema.lessonItems.lessonId, lesson.id)).run()
+
+        for (const item of (resolved as LessonContentView).vocabulary) {
+          tx.insert(schema.lessonItems)
+            .values({ lessonId: lesson.id, kind: 'vocab', payload: JSON.stringify(item) })
+            .run()
+        }
+        for (const item of (resolved as LessonContentView).grammarPoints) {
+          tx.insert(schema.lessonItems)
+            .values({ lessonId: lesson.id, kind: 'grammar', payload: JSON.stringify(item) })
+            .run()
+        }
       })
-      source = 'fallback'
     }
-
-    const resolved: LessonContentView = {
-      ...generated,
-      // O nível é do currículo/trilha — um modelo fraco não rebaixa nem promove a lição.
-      level,
-      pitfalls: generated.pitfalls ?? pitfallsFrom(focus),
-      source
-    }
-    content = resolved
-
-    db.transaction((tx) => {
-      tx.update(schema.lessons)
-        .set({ content: JSON.stringify(resolved), level: resolved.level, version: lesson.version + 1 })
-        .where(eq(schema.lessons.id, lesson.id))
-        .run()
-
-      tx.delete(schema.lessonItems).where(eq(schema.lessonItems.lessonId, lesson.id)).run()
-
-      for (const item of resolved.vocabulary) {
-        tx.insert(schema.lessonItems)
-          .values({ lessonId: lesson.id, kind: 'vocab', payload: JSON.stringify(item) })
-          .run()
-      }
-      for (const item of resolved.grammarPoints) {
-        tx.insert(schema.lessonItems)
-          .values({ lessonId: lesson.id, kind: 'grammar', payload: JSON.stringify(item) })
-          .run()
-      }
-    })
   }
 
   if (!content) throw new Error('Não foi possível preparar o conteúdo da lição.')
@@ -551,12 +591,24 @@ async function ensureLessonGenerated(
   }
 
   const existingExercises = db
-    .select({ id: schema.exercises.id, source: schema.exercises.source })
+    .select({
+      id: schema.exercises.id,
+      source: schema.exercises.source,
+      blocked: schema.exercises.blocked,
+      payload: schema.exercises.payload
+    })
     .from(schema.exercises)
     .where(eq(schema.exercises.lessonId, lesson.id))
     .all()
 
-  if (existingExercises.length > 0 && !options.forceExercises) return focus
+  const usable = existingExercises.filter((row) => !row.blocked)
+
+  if (usable.length >= minExercises && !options.forceExercises) return focus
+
+  // Reportado como ruim: o aluno não vê mais estes itens. Abaixo do piso, a
+  // lição é recomposta — mantendo os exercícios bons, só trocando o que sobrou.
+  const replaceWholeBlock = options.forceExercises || usable.length === 0
+  const shortfall = Math.max(1, minExercises - usable.length)
 
   const hints = recentErrorHints(profile.id)
   const prompt = exercisePrompt({
@@ -581,16 +633,13 @@ async function ensureLessonGenerated(
   } catch (error) {
     if (!offlineReady) {
       throw new Error(
-        `A IA está indisponível e o gerador offline só cobre inglês. ` +
-          `Para gerar exercícios de ${locale.targetName}, configure um provedor em Configurações.`
+        runtimeText(profile.nativeLang, 'error.aiUnavailableExercises', { target: locale.targetName })
       )
     }
     // Regenerar não pode piorar a lição: sem IA, o gerador local é mais pobre
     // que o bloco salvo — mantém o atual e avisa em vez de trocar em silêncio.
-    if (options.forceExercises && existingExercises.some((row) => row.source === 'ai')) {
-      throw new Error(
-        'A IA está indisponível, então os exercícios atuais foram mantidos. Tente de novo quando o provedor voltar.'
-      )
+    if (replaceWholeBlock && usable.some((row) => row.source === 'ai')) {
+      throw new Error(runtimeText(profile.nativeLang, 'error.aiKeptExercises'))
     }
     console.warn(
       '[learning] geração de exercícios falhou, usando exercícios determinísticos:',
@@ -600,13 +649,33 @@ async function ensureLessonGenerated(
     source = 'fallback'
   }
 
-  const rows = generated.exercises.map((exercise, index) => {
+  // Top-up não pode repetir enunciado que o aluno já tem na frente.
+  const seen = new Set(
+    replaceWholeBlock ? [] : usable.map((row) => normalizeText(exercisePayload(row).prompt))
+  )
+
+  const rows: Array<{
+    lessonId: number
+    type: ExerciseType
+    payload: string
+    answerKey: string
+    source: 'ai' | 'fallback'
+    position: number
+    createdAt: number
+  }> = []
+
+  for (const [index, exercise] of generated.exercises.entries()) {
+    if (!replaceWholeBlock && rows.length >= shortfall) {
+      // Top-up: só os itens que faltam, sem dobrar a prática da lição.
+      break
+    }
+
     let answer = exercise.answer
-    let options = exercise.type === 'multiple_choice' ? exercise.options : []
+    let options_ = exercise.type === 'multiple_choice' ? exercise.options : []
     let tokens: string[] = []
 
-    if (exercise.type === 'multiple_choice' && !options.includes(answer)) {
-      const match = options.find((option) => normalizeText(option) === normalizeText(answer))
+    if (exercise.type === 'multiple_choice' && !options_.includes(answer)) {
+      const match = options_.find((option) => normalizeText(option) === normalizeText(answer))
       if (match) answer = match
     }
 
@@ -617,7 +686,7 @@ async function ensureLessonGenerated(
       tokens = shuffleTokens(baseTokens, lesson.id * 1000 + index)
     }
 
-    options = options.filter(Boolean)
+    options_ = options_.filter(Boolean)
 
     // Cloze da IA sem dica de tradução = resposta adivinhável. Se a palavra
     // esperada está no vocabulário da lição, a tradução entra no enunciado.
@@ -626,10 +695,13 @@ async function ensureLessonGenerated(
         ? clarifyCloze(exercise.prompt, answer, exerciseLevel.vocabulary)
         : exercise.prompt
 
+    if (seen.has(normalizeText(promptText))) continue
+    seen.add(normalizeText(promptText))
+
     const payload: ExercisePayload = {
       instruction: exercise.instruction,
       prompt: promptText,
-      options,
+      options: options_,
       tokens,
       targetTags: exercise.targetTags ?? []
     }
@@ -640,33 +712,36 @@ async function ensureLessonGenerated(
       explanation: exercise.explanation
     }
 
-    return {
+    rows.push({
       lessonId: lesson.id,
       type: exercise.type,
       payload: JSON.stringify(payload),
       answerKey: JSON.stringify(answerKey),
       source,
-      position: index,
+      position: existingExercises.length + rows.length,
       createdAt: Date.now()
-    }
-  })
+    })
+  }
+
+  if (rows.length === 0) return focus
+
+  const dropIds = replaceWholeBlock ? usable.map((row) => row.id) : []
 
   db.transaction((tx) => {
-    if (existingExercises.length > 0) {
+    if (dropIds.length > 0) {
       // `attempts` não tem FK: apagar os exercícios e deixar as tentativas
       // para trás criaria linhas órfãs apontando para exercícios extintos.
-      tx.delete(schema.attempts)
-        .where(
-          inArray(
-            schema.attempts.exerciseId,
-            existingExercises.map((entry) => entry.id)
-          )
-        )
-        .run()
+      tx.delete(schema.attempts).where(inArray(schema.attempts.exerciseId, dropIds)).run()
+      tx.delete(schema.exercises).where(inArray(schema.exercises.id, dropIds)).run()
     }
-    tx.delete(schema.exercises).where(eq(schema.exercises.lessonId, lesson.id)).run()
     for (const row of rows) {
       tx.insert(schema.exercises).values(row).run()
+    }
+    if (options.prewarm) {
+      tx.update(schema.lessons)
+        .set({ prewarmedAt: Date.now() })
+        .where(eq(schema.lessons.id, lesson.id))
+        .run()
     }
   })
 
@@ -681,6 +756,106 @@ function parseAnswerKey(row: ExerciseRow): ExerciseAnswerKey {
       explanation: ''
     }
   )
+}
+
+/** Lições com menos disto voltam para a fila de aquecimento (M5). */
+const PREWARM_MIN_EXERCISES = 6
+
+/** Exercícios utilizáveis de uma lição (os reportados como ruins não contam). */
+function usableExerciseCount(lessonId: number): number {
+  return Number(
+    getDb()
+      .select({ value: count() })
+      .from(schema.exercises)
+      .where(and(eq(schema.exercises.lessonId, lessonId), eq(schema.exercises.blocked, false)))
+      .get()?.value ?? 0
+  )
+}
+
+/**
+ * M5: sessão de lição deixada aberta (janela fechada no meio, app morto) é
+ * encerrada na próxima abertura da mesma lição, com o tempo da última tentativa
+ * real como fim. Sem isso o painel de Progresso somaria horas fantasma ou
+ * perderia o tempo que o aluno de fato passou ali.
+ */
+function closeOrphanLessonSessions(profileId: number, lessonId: number): void {
+  const db = getDb()
+
+  const orphans = db
+    .select()
+    .from(schema.studySessions)
+    .where(
+      and(
+        eq(schema.studySessions.profileId, profileId),
+        eq(schema.studySessions.kind, 'lesson'),
+        isNull(schema.studySessions.endedAt)
+      )
+    )
+    .all()
+    .filter((row) => parseJson<{ lessonId?: number }>(row.summary)?.lessonId === lessonId)
+
+  if (orphans.length === 0) return
+
+  const exerciseIds = db
+    .select({ id: schema.exercises.id })
+    .from(schema.exercises)
+    .where(eq(schema.exercises.lessonId, lessonId))
+    .all()
+    .map((row) => row.id)
+
+  for (const row of orphans) {
+    let endedAt = row.startedAt
+
+    if (exerciseIds.length > 0) {
+      const last = db
+        .select({ value: sql<number>`max(${schema.attempts.createdAt})` })
+        .from(schema.attempts)
+        .where(
+          and(inArray(schema.attempts.exerciseId, exerciseIds), gte(schema.attempts.createdAt, row.startedAt))
+        )
+        .get()?.value
+
+      if (last && last > endedAt) endedAt = last
+    }
+
+    db.update(schema.studySessions)
+      .set({ endedAt })
+      .where(eq(schema.studySessions.id, row.id))
+      .run()
+  }
+}
+
+/**
+ * Aquecimento de uma lição (M5) — mesmo caminho de `openLesson`, **sem** criar
+ * sessão de estudo nem mexer em progresso: é assim que a pré-geração enche o
+ * cache sem contaminar o painel de Progresso. Idempotente: lição completa sai
+ * imediatamente.
+ */
+export async function prewarmLesson(lessonId: number): Promise<{
+  content: boolean
+  exercises: number
+  source: 'ai' | 'fallback' | null
+}> {
+  const profile = getDefaultProfile()
+  const owned = getOwnedLesson(lessonId, profile.id)
+  if (!owned) throw new Error('Lição não encontrada.')
+
+  const hadContent = Boolean(owned.lesson.content) && owned.lesson.staleAt == null
+  const before = usableExerciseCount(lessonId)
+
+  await ensureLessonGenerated(owned.lesson, profile, owned.owner, {
+    prewarm: true,
+    minExercises: PREWARM_MIN_EXERCISES
+  })
+
+  const fresh = getOwnedLesson(lessonId, profile.id)
+  const content = readLessonContent(fresh?.lesson.content)
+
+  return {
+    content: !hadContent && Boolean(content),
+    exercises: Math.max(0, usableExerciseCount(lessonId) - before),
+    source: content?.source ?? null
+  }
 }
 
 export async function openLesson(lessonId: number): Promise<LessonDetail> {
@@ -698,16 +873,22 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
   const content = readLessonContent(fresh.lesson.content)
   if (!content) throw new Error('Não foi possível carregar o conteúdo da lição.')
 
+  // Exercícios reportados como ruins não voltam para a prática.
   const exerciseRows = db
     .select()
     .from(schema.exercises)
-    .where(eq(schema.exercises.lessonId, lessonId))
+    .where(and(eq(schema.exercises.lessonId, lessonId), eq(schema.exercises.blocked, false)))
     .orderBy(asc(schema.exercises.position), asc(schema.exercises.id))
     .all()
 
   if (exerciseRows.length === 0) {
     throw new Error('A lição foi gerada sem exercícios. Tente abrir novamente.')
   }
+
+  // M5: sessão órfã de uma abertura anterior (aluno fechou a aba no meio) é
+  // encerrada antes da nova começar — senão o painel de Progresso conta tempo
+  // que não aconteceu, ou perde de vez o tempo que aconteceu.
+  closeOrphanLessonSessions(profile.id, lessonId)
 
   const session = db
     .insert(schema.studySessions)
@@ -784,6 +965,9 @@ export async function answerExercise(input: {
     .get()
 
   if (!exercise) throw new Error('Exercício não encontrado.')
+  if (exercise.blocked) {
+    throw new Error(runtimeText(profile.nativeLang, 'error.exerciseRemoved'))
+  }
 
   const lesson = db
     .select()
@@ -828,13 +1012,14 @@ export async function answerExercise(input: {
         errorTags: graded.errorTags
       }
     } catch {
+      // Sem IA, o veredito é o gabarito — e a frase é do idioma do aluno (M5).
       const correct = normalizeText(response) === normalizeText(answerKey.answer)
       feedback = {
         correct,
         score: correct ? 1 : 0,
         feedback: correct
-          ? 'Correto!'
-          : `Ainda não. Resposta esperada: ${answerKey.answer}`,
+          ? runtimeText(profile.nativeLang, 'grade.correct')
+          : runtimeText(profile.nativeLang, 'grade.incorrect', { answer: answerKey.answer }),
         corrected: correct ? response : answerKey.answer,
         errorTags: correct ? [] : ['accuracy']
       }
@@ -866,7 +1051,7 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
   const exerciseRows = db
     .select({ id: schema.exercises.id })
     .from(schema.exercises)
-    .where(eq(schema.exercises.lessonId, input.lessonId))
+    .where(and(eq(schema.exercises.lessonId, input.lessonId), eq(schema.exercises.blocked, false)))
     .all()
 
   const exerciseIds = exerciseRows.map((row) => row.id)
@@ -940,6 +1125,8 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
     })
     .where(eq(schema.studySessions.id, input.sessionId))
     .run()
+
+  emitStudentEvent('lesson-finished', String(input.lessonId))
 
   return { lessonId: input.lessonId, score, correct, total, cardsCreated, levelChange }
 }
@@ -1146,6 +1333,7 @@ export function resetMemory(): ProfileState {
     tx.delete(schema.errors).run()
     tx.delete(schema.attempts).run()
     tx.delete(schema.scenarioRuns).run()
+    tx.delete(schema.contentReports).run()
     tx.delete(schema.messages).run()
     tx.delete(schema.conversations).run()
     tx.delete(schema.studySessions).run()

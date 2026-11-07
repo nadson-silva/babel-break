@@ -1,14 +1,17 @@
 import type { JSX } from 'react'
-import type { SettingsPayload } from '../../../shared/types'
+import type { ProviderStatus, SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n'
+import { AiStatusChip } from './AiStatus'
 
-export type View = 'home' | 'lessons' | 'tracks' | 'tutor' | 'review' | 'notebook' | 'settings'
+export type View = 'home' | 'lessons' | 'tracks' | 'tutor' | 'review' | 'notebook' | 'progress' | 'settings'
 
 interface SidebarProps {
   view: View
   onNavigate: (view: View) => void
   settings: SettingsPayload
   dueCount?: number
+  /** M5: disponibilidade da IA (chip no rodapé) — null até a primeira sonda. */
+  aiStatus?: ProviderStatus | null
 }
 
 function HomeIcon(): JSX.Element {
@@ -145,7 +148,16 @@ function TrackIcon(): JSX.Element {
   )
 }
 
-export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarProps): JSX.Element {
+function ProgressIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path d="M4 19h16" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M6.5 15.5v3M11 11v7.5M15.5 7.5V18M20 12.5V18" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = null }: SidebarProps): JSX.Element {
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
   const providerLabel = settings.provider === 'gemini' ? t.provider.gemini : t.provider.ollama
   const secure =
@@ -204,6 +216,12 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarPro
           label={t.nav.notebook}
         />
         <NavButton
+          active={view === 'progress'}
+          onClick={() => onNavigate('progress')}
+          icon={<ProgressIcon />}
+          label={t.nav.progress}
+        />
+        <NavButton
           active={view === 'settings'}
           onClick={() => onNavigate('settings')}
           icon={<SettingsIcon />}
@@ -213,7 +231,10 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarPro
 
       <div className="mt-auto space-y-3 border-t border-line-soft p-4">
         <div className="rounded-xl border border-line-soft bg-panel-2 p-3">
-          <div className="text-[10px] uppercase tracking-wider text-faint">Provedor</div>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.providerTitle}</span>
+            <AiStatusChip status={aiStatus} />
+          </div>
           <div className="mt-1 flex items-center justify-between gap-2">
             <span className="text-sm font-medium">{providerLabel}</span>
             <span
@@ -223,17 +244,13 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0 }: SidebarPro
             />
           </div>
           <div className="mt-1 truncate text-xs text-muted" title={model}>
-            {model || 'modelo não definido'}
+            {model || t.offline.chipNoModel}
           </div>
         </div>
 
         <div className="flex items-center gap-2 px-1 text-[11px] text-faint">
           <span className={`size-1.5 rounded-full ${secure ? 'bg-accent' : 'bg-warn'}`} />
-          {secure
-            ? 'Keyring ativo'
-            : settings.secureStorage.available
-              ? 'Keyring básico'
-              : 'Sem keyring'}
+          {secure ? t.settings.securityOk : settings.secureStorage.available ? t.settings.securityBasic : t.settings.securityUnavailable}
         </div>
       </div>
     </aside>

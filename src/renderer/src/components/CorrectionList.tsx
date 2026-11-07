@@ -2,6 +2,7 @@ import type { JSX } from 'react'
 import type { Correction } from '../../../shared/types'
 import { t } from '../i18n'
 import { pairCodeLabel, targetLanguage } from '../lang'
+import { ReportButton } from './ReportButton'
 
 interface CorrectionListProps {
   corrections: Correction[]
@@ -47,6 +48,11 @@ export function CorrectionList({ corrections, recast, variant = 'inline' }: Corr
             )}
           </div>
           {correction.note && <div className="text-[11px] text-muted">{correction.note}</div>}
+          {/* O botão que recalibra: a correção contestada sai do foco das
+              próximas lições, mas continua no caderno como histórico. */}
+          <div className="mt-1">
+            <ReportButton kind="correction" text={correction.original} tag={correction.tag} replacement={correction.corrected} compact />
+          </div>
         </div>
       ))}
 

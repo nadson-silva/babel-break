@@ -90,6 +90,30 @@ describe('contrato IPC', () => {
     expect(registered.has('languages:list')).toBe(true)
   })
 
+  it('expõe o produto do M5 (painel, reports, cache e disponibilidade da IA)', () => {
+    for (const channel of [
+      'dashboard:get',
+      'report:submit',
+      'report:undo',
+      'report:undo-target',
+      'report:list',
+      'pregen:state',
+      'pregen:run',
+      'cache:stats',
+      'provider:status',
+      'provider:probe'
+    ]) {
+      expect(registered.has(channel), channel).toBe(true)
+    }
+
+    // O banner offline é empurrado pelo main, não consultado em polling.
+    const preload = readFileSync(path.resolve(process.cwd(), 'src/preload/index.ts'), 'utf8')
+    expect(preload).toContain("ipcRenderer.on('provider:event'")
+    expect(readFileSync(path.resolve(process.cwd(), 'src/main/provider-status.ts'), 'utf8')).toContain(
+      "STATUS_CHANNEL = 'provider:event'"
+    )
+  })
+
   it('não deixou canal órfão sem chamada no preload', () => {
     const invoked = new Set(invokedChannels())
     const orphans = [...registered.keys()].filter(

@@ -15,6 +15,7 @@
 | Idioma da interface | **Português (PT-BR)** |
 | Experiência central | **Híbrida**: aulas estruturadas + conversas com tutor de IA |
 | Frequência | **Livre, sob demanda** — sem sessão diária, streak ou meta obrigatória |
+| Distribuição (M5) | **AppImage + .deb** (Linux); Windows/macOS validados depois |
 | Idiomas suportados | Qualquer idioma (conteúdo gerado por IA), com inglês como fixture de qualidade |
 | Provedores de IA | **Ollama** (local) ou **Gemini** (nuvem) — usuário escolhe |
 | Escopo v1 | MVP funcional, usuário único, sem contas/billing |
@@ -228,7 +229,7 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência | ✅ concluído |
 | **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ✅ concluído |
 | **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ✅ concluído |
-| **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | ⏭ próximo |
+| **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | ✅ concluído |
 | **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
 
 Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
@@ -268,6 +269,27 @@ multilíngue (preserva `\p{L}`, harakat sem destruir kana/Hangul), onboarding co
 (recap de fechamento, rótulo de intervalo FSRS) ainda saem em PT-BR: são conteúdo do modelo do
 aluno gerado no main, não strings de interface — traduzi-los é lapidação para o M5.
 
+Notas do que ficou pronto no M5: `core/dashboard.ts` (aritmética pura do painel — janelas de
+7/30 dias, dias com prática em vez de streak, teto de 90 min por sessão, retenção, taxa de
+lembrança) e `main/dashboard.ts` (agrega lições, vocabulário FSRS, caderno, trilhas com
+`contentScore`/`languageScore` médios, reports e cache num só payload); `main/prewarm.ts`
+(fila ociosa de **pré-geração**: um ciclo por vez, no máximo 2 itens, só com a sonda em `ok`,
+adiada enquanto o aluno gera na tela; marca `lessons.prewarmed_at` e nunca regrava o que já
+serve); `main/provider-status.ts` (sonda do provedor com TTL, empurra `provider:event` e
+distingue "sem internet" de "sem IA" — Ollama local continua funcionando offline) com o banner
+honesto do que segue funcionando (cache, revisão, banco de interferência); `shared/report-reasons.ts`
++ `core/reports.ts` + `main/reports.ts` (o **botão de reportar conteúdo ruim** com efeito real e
+reversível: `exercise` sai da prática e volta pela fila de aquecimento, `lesson_content` envelhece o
+cache e é reescrito na próxima abertura, `correction` — o "essa correção foi injusta" do §11 — tira o
+erro do foco de prompt sem apagá-lo do caderno; registro em `content_reports`); `core/runtime-text.ts`
+(fecha a pendência do M4: cards, rótulos de intervalo FSRS, recapitulação, motivo da sugestão e erros
+de geração saem no idioma das explicações, com fallback em inglês); empacotamento electron-builder
+(AppImage + .deb, migrações como `extraResources`, better-sqlite3 fora do asar) e `scripts/eval.mjs`
+por idioma (`--lang en|es|ja|ar`, ~20 tarefas golden, acurácia de correção, checagem de escrita
+CJK/RTL, `--offline` para a linha de base determinística). Testes: `src/core/dashboard.test.ts`,
+`src/core/reports.test.ts`, `src/core/runtime-text.test.ts`, `src/main/m5.integration.test.ts`,
+`src/main/bridge.contract.test.ts` e o smoke com IA real `src/main/m5.smoke.test.ts` (`LT_SMOKE=1`).
+
 A base vem antes das trilhas de propósito: trilhas reutilizam a mesma máquina de lição/exercício/SRS;
 construí-las primeiro significaria construir tudo duas vezes.
 
@@ -279,7 +301,7 @@ construí-las primeiro significaria construir tudo duas vezes.
 - **Modelos locais fracos** → tarefas pequenas com schema, retentativa, degradação graciosa.
 - **Roleplay subjetivo** → rubrica de conteúdo por checklist + score de língua separado.
 - **Frequência livre pode reduzir retenção** → recomendação não coercitiva ("continuar de onde parei", próximo passo sugerido), progresso visível, lembrete opt-in. Nunca streak quebrado, culpa ou meta expirada.
-- **Harness de eval** a partir do M2: ~20 tarefas golden por idioma, medindo taxa de JSON inválido, latência e acurácia de correção. `scripts/eval.ts` manual, não CI.
+- **Harness de eval** a partir do M2: ~20 tarefas golden por idioma, medindo taxa de JSON inválido, latência e acurácia de correção. `scripts/eval.mjs` manual, não CI — no M5 ganhou `--lang` (en/es/ja/ar), checagem de escrita (CJK/RTL) e `--offline`.
 
 ## 12. Fora de escopo na v1
 

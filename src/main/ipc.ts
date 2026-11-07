@@ -1,11 +1,16 @@
 import { app, ipcMain } from 'electron'
 import type { AppSettings, LanguageOption, ProviderId, SettingsPayload, TestResult } from '../shared/types'
 import { LANGUAGES } from '../core/languages'
+import { registerDashboardIpc } from './dashboard'
 import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
+import { registerPrewarmIpc } from './prewarm'
+import { registerReportsIpc } from './reports'
+import { refreshProviderStatus } from './provider-status'
 import { registerScenarioIpc } from './scenario'
 import { registerTracksIpc } from './tracks'
+import { emitStudentEvent } from './events'
 import { getProvider } from './providers'
 import {
   clearGeminiApiKey,
@@ -56,8 +61,15 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle('settings:update', async (_event, patch: Partial<AppSettings>) => {
     updateSettings(patch)
+    // M5: mexer em provedor/peso de foco muda o que vale a pena aquecer.
+    emitStudentEvent('settings-saved')
     return settingsPayload()
   })
+
+  // M5: estado de disponibilidade da IA — o que faz a UI dizer "offline" com
+  // precisão (Ollama local continua "online" sem internet).
+  ipcMain.handle('provider:status', () => refreshProviderStatus())
+  ipcMain.handle('provider:probe', () => refreshProviderStatus({ force: true, announce: true }))
 
   ipcMain.handle('settings:set-gemini-key', async (_event, key: string) => {
     await setGeminiApiKey(key)
@@ -94,4 +106,7 @@ export function registerIpcHandlers(): void {
   registerLoopIpc()
   registerTracksIpc()
   registerScenarioIpc()
+  registerDashboardIpc()
+  registerReportsIpc()
+  registerPrewarmIpc()
 }

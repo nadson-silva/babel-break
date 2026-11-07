@@ -3,6 +3,7 @@ import type { JSX } from 'react'
 import type { NotebookTag, NotebookView } from '../../../shared/types'
 import { t } from '../i18n'
 import { pairCodeLabel, nativeLabel } from '../lang'
+import { ReportButton } from '../components/ReportButton'
 import { TargetText } from '../components/TargetText'
 
 function messageOf(error: unknown): string {
@@ -30,10 +31,13 @@ function bankTitle(view: NotebookView | null): string {
 
 function TagGroup({
   tag,
-  onToggle
+  onToggle,
+  onReactivate
 }: {
   tag: NotebookTag
   onToggle: (errorId: number, resolved: boolean) => void
+  /** M5: desfaz o report "essa correção foi injusta" e devolve o erro ao foco. */
+  onReactivate: (errorId: number) => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
 
@@ -76,17 +80,42 @@ function TagGroup({
               </div>
               {example.note && <p className="mt-1 text-xs leading-relaxed text-muted">{example.note}</p>}
               <div className="mt-2 flex items-center justify-between gap-3">
-                <span className="text-[10px] uppercase tracking-wider text-faint">
-                  {categoryLabel(example.category)}
-                  {sourceLabel(example.source) ? ` · ${sourceLabel(example.source)}` : ''}
+                <span className="flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-wider text-faint">
+                  <span>
+                    {categoryLabel(example.category)}
+                    {sourceLabel(example.source) ? ` · ${sourceLabel(example.source)}` : ''}
+                  </span>
+                  {example.disputed && (
+                    <span className="rounded-full bg-warn-soft px-2 py-0.5 text-warn">{t.progress.disputedBadge}</span>
+                  )}
                 </span>
-                <button
-                  type="button"
-                  onClick={() => onToggle(example.id, !tag.resolved)}
-                  className="text-[11px] text-muted underline underline-offset-2 hover:text-ink"
-                >
-                  {tag.resolved ? t.notebook.reopen : t.notebook.markResolved}
-                </button>
+                <div className="flex items-center gap-3">
+                  {/* M5: contestar a correção — ou reativá-la depois de mudar de ideia. */}
+                  {example.disputed ? (
+                    <button
+                      type="button"
+                      onClick={() => onReactivate(example.id)}
+                      className="text-[11px] text-warn underline underline-offset-2 hover:text-ink"
+                    >
+                      {t.reports.undo}
+                    </button>
+                  ) : (
+                    <ReportButton
+                      kind="correction"
+                      text={example.original}
+                      tag={tag.tag}
+                      replacement={example.corrected}
+                      compact
+                    />
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => onToggle(example.id, !tag.resolved)}
+                    className="text-[11px] text-muted underline underline-offset-2 hover:text-ink"
+                  >
+                    {tag.resolved ? t.notebook.reopen : t.notebook.markResolved}
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -117,6 +146,12 @@ export function NotebookScreen(): JSX.Element {
 
   async function toggle(errorId: number, resolved: boolean): Promise<void> {
     await window.api.notebook.resolve(errorId, resolved)
+    await load()
+  }
+
+  /** Desfaz o report de "correção injusta" deste erro (M5). */
+  async function reactivate(errorId: number): Promise<void> {
+    await window.api.report.undoTarget('correction', errorId)
     await load()
   }
 
@@ -204,11 +239,21 @@ export function NotebookScreen(): JSX.Element {
             </section>
           ) : (
             <>
-              <div className="text-xs text-faint">
-                {t.notebook.tagCount.replace('{count}', String(view.openCount))}
+              <div className="flex flex-wrap items-center gap-3 text-xs text-faint">
+                <span>{t.notebook.tagCount.replace('{count}', String(view.openCount))}</span>
+                {view.disputedCount > 0 && (
+                  <span className="text-warn">
+                    {t.progress.errorsDisputed.replace('{count}', String(view.disputedCount))}
+                  </span>
+                )}
               </div>
               {tags.map((tag) => (
-                <TagGroup key={tag.tag} tag={tag} onToggle={(id, resolved) => void toggle(id, resolved)} />
+                <TagGroup
+                  key={tag.tag}
+                  tag={tag}
+                  onToggle={(id, resolved) => void toggle(id, resolved)}
+                  onReactivate={(id) => void reactivate(id)}
+                />
               ))}
             </>
           )}

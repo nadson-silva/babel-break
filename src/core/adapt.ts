@@ -27,6 +27,11 @@ export interface NotebookRow {
   /** Timestamp da última vez que o erro apareceu. */
   lastSeen: number
   resolvedAt: number | null
+  /**
+   * M5: o aluno marcou a correção como injusta. Ela sai do **foco** (não vira
+   * exercício nem prioridade de prompt), mas continua no caderno como histórico.
+   */
+  disputedAt?: number | null
 }
 
 function toEntry(row: NotebookRow): ErrorFocusEntry {
@@ -56,6 +61,10 @@ function bankEntry(entry: InterferenceEntry, occurrences = 0): ErrorFocusEntry {
  * interferência do par (passado pelo caller) para o conteúdo já nascer mirando
  * erros reais daquele idioma — pares sem banco passam `anchor = []` e o foco
  * nasce só com o que o aluno produziu.
+ *
+ * M5: erro **disputado** (report "essa correção foi injusta") é tratado como
+ * superado para fins de foco — é assim que o botão recalibra a máquina sem
+ * apagar o histórico do aluno.
  */
 export function errorFocus(
   rows: NotebookRow[],
@@ -63,7 +72,7 @@ export function errorFocus(
   anchor: InterferenceEntry[] = bankEntries()
 ): ErrorFocusEntry[] {
   const open = rows
-    .filter((row) => row.resolvedAt === null)
+    .filter((row) => row.resolvedAt === null && row.disputedAt == null)
     .slice()
     .sort((a, b) => b.occurrences - a.occurrences || b.lastSeen - a.lastSeen)
 

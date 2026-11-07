@@ -4,6 +4,7 @@ import type {
   ConversationSummary,
   ConversationView,
   CurriculumView,
+  DashboardView,
   FocusTrackView,
   GradeFeedback,
   GuidedSession,
@@ -19,7 +20,14 @@ import type {
   PlacementTest,
   ProfileState,
   ProviderId,
+  ProviderStatus,
+  PrewarmCycleOutcome,
+  PrewarmState,
   RecapView,
+  ReportInput,
+  ReportKind,
+  ReportItemView,
+  ReportsSummary,
   ReviewRating,
   ReviewResult,
   ReviewState,
@@ -52,6 +60,12 @@ declare global {
       }
       provider: {
         test(provider: ProviderId): Promise<TestResult>
+        /** M5: estado da última sonda (TTL) — a UI lê antes de prometer geração. */
+        status(): Promise<ProviderStatus>
+        /** Sonda forçada (botão "testar conexão"). */
+        probe(): Promise<ProviderStatus>
+        /** Mudanças de disponibilidade da IA (banner offline). */
+        onStatus(callback: (status: ProviderStatus) => void): () => void
       }
       tutor: {
         onEvent(callback: (event: ChatEvent) => void): () => void
@@ -127,6 +141,23 @@ declare global {
         session(conversationId: number): Promise<ScenarioSession | null>
         runs(limit?: number): Promise<ScenarioRunView[]>
         refresh(lessonId: number): Promise<ScenarioView>
+      }
+      /** M5: painel de Progresso. */
+      dashboard: {
+        get(): Promise<DashboardView>
+      }
+      /** M5: reportar conteúdo ruim (efeito real + registro reversível). */
+      report: {
+        submit(input: ReportInput): Promise<ReportItemView>
+        undo(reportId: number): Promise<ReportItemView | null>
+        undoTarget(kind: ReportKind, targetId: number): Promise<ReportItemView | null>
+        list(limit?: number): Promise<ReportsSummary>
+      }
+      /** M5: pré-geração e cache de conteúdo. */
+      cache: {
+        state(): Promise<PrewarmState>
+        warm(): Promise<PrewarmCycleOutcome>
+        stats(): Promise<CacheStats>
       }
     }
   }

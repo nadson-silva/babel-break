@@ -1,0 +1,88 @@
+# Empacotamento (M5) — electron-builder → AppImage + .deb
+#
+# Três coisas deste arquivo são load-bearing e não são cosméticas:
+#
+# * `extraResources: drizzle/` — o processo main lê as migrações de
+#   `process.resourcesPath/drizzle` quando empacotado (`src/main/db/index.ts`).
+#   Sem isso, o AppImage abre e não cria o banco.
+# * `asarUnpack: better-sqlite3` — o binding nativo precisa existir como arquivo
+#   real no disco; dentro do asar o `require` não funciona.
+# * `npmRebuild: false` — better-sqlite3 13 traz prebuild N-API que roda no
+#   Electron sem recompilar (README §Instalação), então não pedimos toolchain.
+appId: com.nadson.language-teacher
+productName: Language Teacher
+copyright: Copyright © 2026 Nadson Silva
+executableName: language-teacher
+
+directories:
+  output: release
+  buildResources: build
+
+# Padrões ANCORADOS na raiz do projeto: `dist/**` tira o *nosso* dist, mas
+# `!**/dist/**` tiraria o `dist/` de toda dependência — e é lá que o código delas
+# mora (ts-fsrs, @google/genai…). Errei isso uma vez; o AppImage abria e morria
+# em `Cannot find module .../ts-fsrs/dist/index.cjs`.
+files:
+  - out/**
+  - package.json
+  - node_modules/**
+  - '!{.github,.git,.vscode,.idea,coverage,docs,examples,scripts,src,test,tests,drizzle,build,release}/**'
+  - '!{PLAN,README}.md'
+  - '!**/*.{map,tsbuildinfo}'
+  - '!{electron-builder.yml,drizzle.config.ts,electron.vite.config.ts,vitest.config.mts,tsconfig*.json}'
+
+asar: true
+asarUnpack:
+  - node_modules/better-sqlite3/**
+
+npmRebuild: false
+
+extraResources:
+  - from: drizzle
+    to: drizzle
+    filter:
+      - '**/*.sql'
+      - 'meta/**'
+
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Education
+  maintainer: Nadson Silva <nadsonsilva05@gmail.com>
+  synopsis: Tutor de idiomas local-first com IA (Ollama ou Gemini)
+  description: |
+    Tutor de idiomas desktop, local-first, que lembra dos seus erros e respeita o
+    seu ritmo. Aulas estruturadas, conversas com correção inline, caderno de erros,
+    revisão espaçada (FSRS) e trilhas de foco. Roda com Ollama (local, offline) ou
+    Gemini (nuvem). Sem sessão diária, sem streak, sem meta obrigatória.
+    Ensina qualquer idioma via IA; inglês é o fixture de qualidade com conteúdo
+    offline. Interface em português (PT-BR) e inglês.
+  syncDesktopName: true
+  icon: build/icons
+  artifactName: ${name}-${version}-linux-${arch}.${ext}
+  mimeTypes:
+    - x-scheme-handler/languageteacher
+  desktop:
+    entry:
+      Name: Language Teacher
+      Comment: Tutor de idiomas local-first com IA
+      GenericName: Language tutor
+      Categories: Education;Language;
+      Keywords: languages;tutor;ollama;gemini;srs;
+      Terminal: 'false'
+
+appImage:
+  artifactName: ${name}-${version}.AppImage
+
+deb:
+  artifactName: ${name}-${version}_${arch}.deb
+  depends:
+    # Electron precisa destes; o Ollama é opcional e externo por design.
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
+    - libatspi2.0-0

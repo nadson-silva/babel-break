@@ -5,12 +5,15 @@ import type {
   LanguageOption,
   ModelInfo,
   ProfileState,
+  ProviderStatus,
   ProfileView,
   ProviderId,
+  PrewarmState,
   SettingsPayload,
   TestResult
 } from '../../../shared/types'
-import { t, UI_LANGUAGES } from '../i18n'
+import { getUiLanguage, t, UI_LANGUAGES } from '../i18n'
+import { formatBytes } from '../lib/format'
 import { nativeLabel, targetLabel } from '../lang'
 
 interface SettingsScreenProps {
@@ -30,7 +33,8 @@ function toForm(settings: SettingsPayload): AppSettings {
     ollamaBaseUrl: settings.ollamaBaseUrl,
     correctionStyle: settings.correctionStyle,
     focusMix: settings.focusMix,
-    uiLang: settings.uiLang
+    uiLang: settings.uiLang,
+    pregenerate: settings.pregenerate
   }
 }
 
@@ -96,6 +100,10 @@ export function SettingsScreen({
     gemini: false,
     ollama: false
   })
+  // M5: estado da pré-geração/cache e da sonda de disponibilidade da IA.
+  const [cache, setCache] = useState<PrewarmState | null>(null)
+  const [warming, setWarming] = useState(false)
+  const [warmMessage, setWarmMessage] = useState<string | null>(null)
 
   useEffect(() => {
     setForm(toForm(settings))
@@ -104,8 +112,63 @@ export function SettingsScreen({
   useEffect(() => {
     void loadModels('gemini')
     void loadModels('ollama')
+    void loadCache()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  async function loadCache(): Promise<void> {
+    try {
+      const [state, status] = await Promise.all([window.api.cache.state(), window.api.provider.status()])
+      setCache({ ...state, ai: status })
+    } catch {
+      setCache(null)
+    }
+  }
+
+  /** M5: roda um ciclo de aquecimento na hora (o padrão é o app decidir sozinho). */
+  async function warmNow(): Promise<void> {
+    setWarming(true)
+    setWarmMessage(null)
+    try {
+      const outcome = await window.api.cache.warm()
+      const warmed = outcome.warmed.content + outcome.warmed.exercises + outcome.warmed.scenarios
+      setWarmMessage(
+        warmed > 0
+          ? t.cache.warmed
+              .replace('{content}', String(outcome.warmed.content))
+              .replace('{exercises}', String(outcome.warmed.exercises))
+          : sourceLabel(outcome.source)
+      )
+    } catch (warmError) {
+      setWarmMessage(warmError instanceof Error ? warmError.message : String(warmError))
+    } finally {
+      setWarming(false)
+      void loadCache()
+    }
+  }
+
+  function sourceLabel(source: 'ai' | 'fallback' | 'skip' | 'unavailable'): string {
+    if (source === 'ai') return t.cache.sourceAi
+    if (source === 'fallback') return t.cache.sourceFallback
+    if (source === 'skip') return t.cache.sourceSkip
+    return t.cache.sourceUnavailable
+  }
+
+  function statusLabel(status: ProviderStatus | null): string {
+    if (!status) return t.offline.chipProbing
+    switch (status.state) {
+      case 'ok':
+        return t.offline.chipOk
+      case 'no-model':
+        return t.offline.chipNoModel
+      case 'no-key':
+        return t.offline.chipNoKey
+      case 'probing':
+        return t.offline.chipProbing
+      default:
+        return t.offline.chipUnreachable
+    }
+  }
 
   async function loadModels(provider: ProviderId): Promise<void> {
     setLoadingModels((previous) => ({ ...previous, [provider]: true }))
@@ -140,6 +203,8 @@ export function SettingsScreen({
       onChanged(next)
       setForm(toForm(next))
       setSavedAt(new Date().toLocaleTimeString(form.uiLang))
+      // Ligar/desligar o aquecimento muda o que a fila faz: reatualiza o painel.
+      void loadCache()
       return true
     } catch (saveError) {
       setError(messageOf(saveError))
@@ -555,6 +620,81 @@ export function SettingsScreen({
             </div>
           </Section>
 
+          <Section title={t.cache.title} help={t.cache.help}>
+            <div className="flex flex-wrap items-center gap-2">
+              {(
+                [
+                  [true, t.cache.on],
+                  [false, t.cache.off]
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  key={String(value)}
+                  type="button"
+                  onClick={() => setForm((current) => ({ ...current, pregenerate: value }))}
+                  className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                    form.pregenerate === value
+                      ? 'border-accent/60 bg-accent-soft text-accent'
+                      : 'border-line bg-panel-2 text-muted hover:text-ink'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => void warmNow()}
+                disabled={warming}
+                className="ml-auto rounded-lg border border-line px-3 py-2 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-50"
+              >
+                {warming ? t.cache.warming : t.cache.warmNow}
+              </button>
+            </div>
+
+            {warmMessage && <p className="mt-2 text-xs text-accent">{warmMessage}</p>}
+
+            {cache && (
+              <div className="mt-3 space-y-1.5 text-xs text-muted">
+                <p>
+                  {t.cache.stats
+                    .replace('{cached}', String(cache.lessonsCached))
+                    .replace('{total}', String(cache.lessonsTotal))
+                    .replace('{exercises}', String(cache.exercisesCached))
+                    .replace('{prewarmed}', String(cache.prewarmedLessons))}
+                </p>
+                <p>{t.cache.size.replace('{size}', formatBytes(cache.dbBytes, getUiLanguage()))}</p>
+                {cache.exercisesHidden > 0 && (
+                  <p>{t.cache.hidden.replace('{count}', String(cache.exercisesHidden))}</p>
+                )}
+                <p className="text-[11px] text-faint">
+                  {cache.lastOutcome
+                    ? t.cache.last.replace(
+                        '{when}',
+                        `${new Date(cache.lastOutcome.at).toLocaleString(getUiLanguage())} · ${sourceLabel(
+                          cache.lastOutcome.source
+                        )}`
+                      )
+                    : t.cache.lastNone}
+                </p>
+                {cache.lastOutcome?.detail && (
+                  <p className="text-[11px] leading-relaxed text-faint">{cache.lastOutcome.detail}</p>
+                )}
+                <p className="flex items-center gap-2 pt-1">
+                  <span
+                    className={`size-1.5 rounded-full ${
+                      cache.ai.state === 'ok' ? 'bg-accent' : cache.ai.state === 'probing' ? 'bg-faint' : 'bg-warn'
+                    }`}
+                  />
+                  {statusLabel(cache.ai)}
+                  {cache.ai.latencyMs != null && <span className="text-faint">· {cache.ai.latencyMs} ms</span>}
+                  {cache.ai.local && <span className="text-faint">· {t.offline.local}</span>}
+                </p>
+              </div>
+            )}
+
+            <p className="mt-3 text-[11px] leading-relaxed text-faint">{t.cache.note}</p>
+          </Section>
+
           <Section
             title={t.settings.securityTitle}
             aside={
@@ -587,7 +727,7 @@ export function SettingsScreen({
                 ['Electron', settings.runtime.electron],
                 ['Chromium', settings.runtime.chrome],
                 ['Node', settings.runtime.node],
-                ['Plataforma', settings.runtime.platform]
+                [t.settings.runtimePlatform, settings.runtime.platform]
               ].map(([label, value]) => (
                 <div key={label} className="rounded-lg border border-line-soft bg-panel-2 px-3 py-2">
                   <dt className="text-[10px] uppercase tracking-wider text-faint">{label}</dt>

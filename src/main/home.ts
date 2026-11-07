@@ -12,6 +12,8 @@ import { desc, eq } from 'drizzle-orm'
 import type { HomeState, LessonSummary, NextSuggestion } from '../shared/types'
 import { pickRecommendationOrigin } from '../core/tracks'
 import { getDb, getDefaultProfile, schema } from './db'
+import { profileNativeLang } from './locale'
+import { runtimeText } from '../core/runtime-text'
 import { focusFor } from './notebook'
 import { curriculumView, lastOpenedLesson, pendingLessons, profileView } from './learning'
 import { reviewState } from './review'
@@ -60,12 +62,15 @@ function suggestionFor(
   const lesson = origin === 'focus' ? focus[0] : base[0]
   if (!lesson) return null
 
+  // M5: o motivo da sugestão é texto do main, então sai no idioma das
+  // explicações do perfil (não é string de interface).
+  const lang = profileNativeLang()
   const reason =
     origin === 'focus'
-      ? `da sua trilha “${lesson.trackTitle ?? 'foco'}”`
+      ? runtimeText(lang, 'suggest.track', { title: lesson.trackTitle ?? '' })
       : lesson.unitTitle
-        ? `do currículo base · ${lesson.unitTitle}`
-        : 'do currículo base'
+        ? runtimeText(lang, 'suggest.baseUnit', { unit: lesson.unitTitle })
+        : runtimeText(lang, 'suggest.base')
 
   return { lesson, origin, reason }
 }

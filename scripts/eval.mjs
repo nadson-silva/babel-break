@@ -1,38 +1,162 @@
 #!/usr/bin/env node
 /**
- * Harness de avaliação (PLAN §11) — manual, não é CI.
+ * Harness de avaliação por idioma (M5, PLAN §11) — manual, não é CI.
  *
- * Roda as tarefas estruturadas contra um provedor real e mede o que importa
- * para o produto: taxa de JSON inválido, latência e se a correção pegou as
- * tags esperadas. A passada determinística (banco PT-BR) é coberta por
- * `npm test`, que é a linha de base quando o modelo falha.
+ * Mede, contra um provedor real, o que importa para o produto:
+ *
+ *   • taxa de JSON inválido        — o contrato de saída quebra?
+ *   • taxa de contrato atendido    — veio o que a tarefa pede (itens, campos)?
+ *   • acurácia de correção         — pegou a tag certa e a forma certa?
+ *   • escrita do idioma            — CJK segmentado, RTL no script certo?
+ *   • latência p50/máx             — o "no seu ritmo" depende disso
+ *
+ * São ~20 tarefas golden por idioma, do jeito que o app pede (system prompt em
+ * PT-BR, saída estruturada), sobre os contratos do plano: placement, curriculum,
+ * lesson, exercises, grade, tutor, track, scenario.
  *
  * Uso:
- *   node scripts/eval.mjs --ollama [modelo]
- *   GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash
+ *   node scripts/eval.mjs --ollama [modelo] [--lang en|es|ja|ar] [--n <tarefas>]
+ *   GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash --lang es
+ *
+ *   node scripts/eval.mjs --offline        # linha de base determinística (sem IA):
+ *                                          # roda os testes do domínio e resume
+ *
+ * Com modelo local pequeno é esperado ver contratos falharem — é exatamente o
+ * caso em que o app degrada para o gerador determinístico (inglês) e o banco de
+ * interferência do par continua corrigindo.
  */
 
-const args = process.argv.slice(2).filter((arg) => !arg.startsWith('--'))
-const provider = process.argv.includes('--gemini') ? 'gemini' : 'ollama'
+const argv = process.argv.slice(2)
+const flags = new Set(argv.filter((arg) => arg.startsWith('--')))
+const positional = argv.filter((arg) => !arg.startsWith('--'))
+
+const provider = flags.has('--gemini') ? 'gemini' : 'ollama'
+const offline = flags.has('--offline')
 const ollamaUrl = (process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434').replace(/\/+$/, '')
-const fallbackModel = provider === 'gemini' ? 'gemini-2.5-flash' : 'qwen3.5:0.8b'
-const model = args[0] ?? process.env.LT_EVAL_MODEL ?? fallbackModel
 const geminiKey = process.env.GEMINI_API_KEY ?? ''
 
-const SYSTEM = [
-  'Você é um professor de inglês para falantes de português do Brasil.',
-  'Explicações em português do Brasil, exemplos no nível CEFR informado.',
-  'Responda SEMPRE com um único objeto JSON válido, sem markdown e sem texto fora do JSON.'
-].join(' ')
+/** `--lang es` (ou LT_EVAL_LANG); default inglês, o fixture de qualidade. */
+const langCode = flagValue('--lang') ?? process.env.LT_EVAL_LANG ?? 'en'
+const model = positional[0] ?? process.env.LT_EVAL_MODEL ?? (provider === 'gemini' ? 'gemini-2.5-flash' : 'qwen3.5:0.8b')
+const repeatLimit = Number(flagValue('--n') ?? process.env.LT_EVAL_N ?? 0) || null
+
+function flagValue(name) {
+  const index = argv.indexOf(name)
+  if (index !== -1 && argv[index + 1] && !argv[index + 1].startsWith('--')) return argv[index + 1]
+  const inline = argv.find((arg) => arg.startsWith(`${name}=`))
+  return inline ? inline.slice(name.length + 1) : null
+}
+
+// --- Idiomas avaliados -------------------------------------------------------
+//
+// Quatro casos que cobrem as classes de escrita do registro do app (§5):
+// espaço + latino, espaço + latino com conjugação agressiva, CJK sem espaço e
+// RTL. Adicionar idioma = acrescentar uma entrada aqui (as tarefas são geradas).
+const LANGS = {
+  en: {
+    target: 'inglês',
+    script: 'latin',
+    direction: 'ltr',
+    spaced: true,
+    sample: 'I am agree with the plan and I didn\'t went to work yesterday.',
+    goal: 'entrevista para desenvolvedor backend',
+    // Acurácia de correção: frase do aluno → tag esperada + trecho esperado na correção.
+    golden: [
+      { text: 'I have 25 years.', tag: 'be-have', expect: 'I am 25' },
+      { text: 'I am agree with you.', tag: 'agreement', expect: 'I agree' },
+      { text: 'Explain me the problem.', tag: 'word-order', expect: 'Explain the problem to me' },
+      { text: 'People is waiting.', tag: 'subject-verb-agreement', expect: 'People are' },
+      { text: 'I didn\'t went yesterday.', tag: 'past-simple', expect: 'didn\'t go' },
+      { text: 'I am boring in this job.', tag: 'participle-adjective', expect: 'bored' },
+      { text: 'She is doctor.', tag: 'articles', expect: 'a doctor' },
+      { text: 'I make a question.', tag: 'collocation', expect: 'ask a question' },
+      { text: 'Actually, I pretend to travel.', tag: 'false-cognate', expect: 'right now|currently|actually' }
+    ]
+  },
+  es: {
+    target: 'espanhol',
+    script: 'latin',
+    direction: 'ltr',
+    spaced: true,
+    sample: 'Yo tengo 25 años y yo am de acuerdo.',
+    goal: 'reunião de trabalho em espanhol',
+    golden: [
+      { text: 'Yo tengo 25 años de experiencia.', tag: 'age', expect: '' },
+      { text: 'Nosotros vamos para casa.', tag: 'preterit|motion-verb', expect: 'a casa' },
+      { text: 'Ella es doctor.', tag: 'gender-agreement', expect: 'doctora' },
+      { text: 'Yo tengo hambre de ir.', tag: 'expression', expect: 'ganas de ir' },
+      { text: 'Me gusta los libros.', tag: 'agreement', expect: 'me gustan los libros' },
+      { text: 'Ayer yo como empanada.', tag: 'past-tense', expect: 'comí' },
+      { text: 'Muy bueno libro.', tag: 'word-order', expect: 'libro muy bueno' }
+    ]
+  },
+  ja: {
+    target: 'japonês',
+    script: 'cjk',
+    direction: 'ltr',
+    spaced: false,
+    sample: '私はエンジニアです。昨日会社に行きました。',
+    goal: 'conversar com colegas no Japão',
+    golden: [
+      { text: '私は昨日学校に行きましたます。', tag: 'politeness|tense', expect: '' },
+      { text: 'これは本です。', tag: 'correct', expect: '' },
+      { text: '私は水を食べたいです。', tag: 'verb-object-collocation', expect: '飲む' },
+      { text: '昨日私は行きます。', tag: 'tense', expect: '行きました' }
+    ]
+  },
+  ar: {
+    target: 'árabe',
+    script: 'arabic',
+    direction: 'rtl',
+    spaced: true,
+    sample: 'أنا مهندس البرمجيات.',
+    goal: 'viagem e restaurante',
+    golden: [
+      { text: 'أنا طالب في الجامعة.', tag: 'correct', expect: '' },
+      { text: 'ذهب أنا إلى السوق.', tag: 'word-order', expect: 'ذهبت إلى السوق' },
+      { text: 'هذا كتاب جميلة.', tag: 'gender-agreement', expect: 'جميل' }
+    ]
+  }
+}
+
+const LANG = LANGS[langCode]
+
+if (!LANG) {
+  console.error(`Idioma desconhecido: --lang ${langCode}. Opções: ${Object.keys(LANGS).join(', ')}`)
+  process.exit(2)
+}
+
+// --- Contratos (JSON Schema mínimo, iguais aos do app) ----------------------
 
 const SCHEMAS = {
+  placement: {
+    type: 'object',
+    properties: {
+      questions: {
+        type: 'array',
+        minItems: 6,
+        maxItems: 14,
+        items: {
+          type: 'object',
+          properties: {
+            level: { type: 'string', enum: ['A1', 'A2', 'B1', 'B2', 'C1'] },
+            prompt: { type: 'string' },
+            options: { type: 'array', minItems: 2, items: { type: 'string' } },
+            answerIndex: { type: 'number' }
+          },
+          required: ['level', 'prompt', 'options', 'answerIndex']
+        }
+      }
+    },
+    required: ['questions']
+  },
   curriculum: {
     type: 'object',
     properties: {
       units: {
         type: 'array',
         minItems: 2,
-        maxItems: 3,
+        maxItems: 4,
         items: {
           type: 'object',
           properties: {
@@ -42,7 +166,7 @@ const SCHEMAS = {
             lessons: {
               type: 'array',
               minItems: 2,
-              maxItems: 4,
+              maxItems: 5,
               items: {
                 type: 'object',
                 properties: { title: { type: 'string' }, objective: { type: 'string' } },
@@ -65,10 +189,11 @@ const SCHEMAS = {
       explanation: { type: 'string' },
       examples: {
         type: 'array',
+        minItems: 2,
         items: {
           type: 'object',
-          properties: { en: { type: 'string' }, pt: { type: 'string' } },
-          required: ['en', 'pt']
+          properties: { target: { type: 'string' }, native: { type: 'string' } },
+          required: ['target', 'native']
         }
       },
       grammarPoints: {
@@ -98,6 +223,7 @@ const SCHEMAS = {
       },
       vocabulary: {
         type: 'array',
+        minItems: 3,
         items: {
           type: 'object',
           properties: { term: { type: 'string' }, translation: { type: 'string' }, example: { type: 'string' } },
@@ -159,16 +285,17 @@ const SCHEMAS = {
     properties: {
       title: { type: 'string' },
       goalTag: { type: 'string' },
+      objective: { type: 'string' },
       lessons: {
         type: 'array',
-        minItems: 4,
+        minItems: 3,
         maxItems: 8,
         items: {
           type: 'object',
           properties: {
             title: { type: 'string' },
             objective: { type: 'string' },
-            focusVocabulary: { type: 'array', items: { type: 'string' } }
+            focusVocabulary: { type: 'array', minItems: 1, items: { type: 'string' } }
           },
           required: ['title', 'objective', 'focusVocabulary']
         }
@@ -181,7 +308,7 @@ const SCHEMAS = {
     properties: {
       persona: { type: 'string' },
       setting: { type: 'string' },
-      successCriteria: { type: 'array', minItems: 2, maxItems: 5, items: { type: 'string' } },
+      successCriteria: { type: 'array', minItems: 2, maxItems: 6, items: { type: 'string' } },
       openingLine: { type: 'string' }
     },
     required: ['persona', 'setting', 'successCriteria', 'openingLine']
@@ -208,70 +335,167 @@ const SCHEMAS = {
   }
 }
 
-const TASKS = [
-  {
-    name: 'curriculum_plan',
-    schema: SCHEMAS.curriculum,
-    user: 'Monte 2 unidades de inglês para um aluno brasileiro A2 com objetivo "entrevista para dev", 3 lições cada, com título e objetivo.'
-  },
-  {
-    name: 'lesson_content',
-    schema: SCHEMAS.lesson,
-    user: [
-      'Conteúdo da lição "Past simple: verbos regulares" (A2).',
-      'Inclua pitfalls: 2 armadilhas de quem fala português (ex.: "I didn\'t went").',
-      'Explicação em português, 3 exemplos inglês/português, 1 ponto de gramática, 5 itens de vocabulário.'
-    ].join('\n')
-  },
-  {
-    name: 'exercise_gen',
-    schema: SCHEMAS.exercises,
-    user: [
-      'Crie 6 exercícios sobre past simple para aluno A2 que erra "didn\'t went" e "I am developer".',
-      'Cada exercício traz targetTags com as áreas que treina; pelo menos 2 devem mirar esses erros.'
-    ].join('\n')
-  },
-  {
-    name: 'grade_answer',
-    schema: SCHEMAS.correction,
-    user: 'Corrija a frase de um aluno: "I have 25 years and I am agree with the plan." Devolva corrections e recast.'
-  },
-  {
+// --- Tarefas golden por idioma ----------------------------------------------
+
+const SYSTEM = [
+  `Você é um professor de ${LANG.target} para falantes de português do Brasil.`,
+  `Explicações em português do Brasil; exemplos em ${LANG.target} no nível CEFR informado.`,
+  LANG.direction === 'rtl'
+    ? `Escreva o texto em ${LANG.target} na direção correta (RTL) e responda em português nas explicações.`
+    : LANG.spaced
+      ? `Use ${LANG.target} natural e no nível pedido.`
+      : `${LANG.target} não separa palavras por espaço: devolva frases naturais sem juntar tokens artificialmente.`,
+  'Responda SEMPRE com um único objeto JSON válido, sem markdown e sem texto fora do JSON.'
+].join(' ')
+
+/** ~20 tarefas por idioma: contratos do plano + acurácia de correção. */
+function tasksFor(lang) {
+  const tasks = [
+    {
+      name: 'placement',
+      schema: SCHEMAS.placement,
+      user: `Monte 8 questões de nivelamento de ${lang.target} para um aluno brasileiro, cobrindo A1 a B1, com 4 opções cada, answerIndex e explanation. O enunciado vai no idioma-alvo, a explicação em português.`
+    },
+    {
+      name: 'curriculum_plan',
+      schema: SCHEMAS.curriculum,
+      user: `Monte 2 unidades de ${lang.target} para aluno A2 com objetivo "${lang.goal}", 3 lições cada, com título e objetivo.`
+    },
+    {
+      name: 'curriculum_plan_incremental',
+      schema: SCHEMAS.curriculum,
+      user: `Outra proposta de 2 unidades de ${lang.target} (A2→B1), agora para conversação do dia a dia, 3 lições por unidade.`
+    },
+    {
+      name: 'lesson_content',
+      schema: SCHEMAS.lesson,
+      user: [
+        `Conteúdo da lição "Apresentar-se e falar do trabalho" (${lang.target}, A2).`,
+        'Inclua pitfalls: 2 armadilhas típicas de quem fala português.',
+        'Explicação em português, 3 exemplos {target, native}, 1 ponto de gramática, 5 itens de vocabulário.'
+      ].join('\n')
+    },
+    {
+      name: 'lesson_content_grammar',
+      schema: SCHEMAS.lesson,
+      user: [
+        `Conteúdo da lição "Passado simples" (${lang.target}, A2), nível governado pela lição.`,
+        'Restrição: use só vocabulário A2 além das 5 palavras-alvo.',
+        'Explicação em português, 3 exemplos {target, native}, 2 pontos de gramática, 5 itens de vocabulário.'
+      ].join('\n')
+    },
+    {
+      name: 'lesson_content_constraints',
+      schema: SCHEMAS.lesson,
+      user: [
+        `Lição "Fazer uma pergunta educada" (${lang.target}, A2) para aluno que erra registro e ordem de palavras.`,
+        'Máximo 2 frases por exemplo. Explicação em português com no máximo 80 palavras.'
+      ].join('\n')
+    },
+    {
+      name: 'exercise_gen',
+      schema: SCHEMAS.exercises,
+      user: [
+        `Crie 6 exercícios de ${lang.target} (A2) sobre passado simples, mirando os erros do aluno.`,
+        'Cada exercício traz targetTags com as áreas que treina; pelo menos 2 devem mirar erros listados.',
+        'Inclua um exercício "order" com tokens separados.'
+      ].join('\n')
+    },
+    {
+      name: 'exercise_gen_types',
+      schema: SCHEMAS.exercises,
+      user: [
+        `Gere 5 exercícios de ${lang.target} (A2) cobrindo múltipla escolha, cloze, tradução, ordenar frase e produção livre.`,
+        'Gabarito (answer) obrigatório e coerente com o enunciado.'
+      ].join('\n')
+    },
+    {
+      name: 'exercise_gen_focus',
+      schema: SCHEMAS.exercises,
+      user: [
+        `Exercícios de ${lang.target} (A2) sobre o domínio "${lang.goal}".`,
+        'Use só vocabulário A2 exceto as 5 palavras-alvo do domínio; cada item diz quais tags treina.'
+      ].join('\n')
+    },
+    {
+      name: 'track_plan',
+      schema: SCHEMAS.track_plan,
+      user: [
+        `Esboço de trilha de foco em ${lang.target}: "${lang.goal}".`,
+        '5 lições com título, objetivo e 5 palavras-alvo do domínio (no idioma-alvo).',
+        'A gramática continua A2; o que muda é vocabulário e situação. Traga title, goalTag e lessons.'
+      ].join('\n')
+    },
+    {
+      name: 'track_plan_short',
+      schema: SCHEMAS.track_plan,
+      user: `Outro esboço de trilha em ${lang.target} (A2), agora "viagem: aeroporto e hospedagem", com 4 lições.`
+    },
+    {
+      name: 'scenario_gen',
+      schema: SCHEMAS.scenario_gen,
+      user: [
+        `Roleplay de fechamento da lição "Pergunte sobre a vaga" (${lang.target}, A2, objetivo "${lang.goal}").`,
+        'persona e setting em português; successCriteria (3 a 4, em português); openingLine no idioma-alvo, nível A2.'
+      ].join('\n')
+    },
+    {
+      name: 'scenario_gen_topic',
+      schema: SCHEMAS.scenario_gen,
+      user: `Cenário avulso em ${lang.target} (A2): "pedir comida em um restaurante". Mesmos campos, openingLine no idioma-alvo.`
+    },
+    {
+      name: 'scenario_feedback',
+      schema: SCHEMAS.scenario_feedback,
+      user: [
+        `Roleplay em ${lang.target}: entrevistador x aluno A2. Critérios: apresentar trajetória; descrever um projeto com resultado; fazer uma pergunta sobre a vaga.`,
+        'Transcrição: aluno: "I have background in backend. I maintain two services." tutor: "Nice." aluno: "My team ship a new api last month."',
+        'Devolva contentScore (0–1, só a tarefa), languageScore (0–1, só a língua), criteriaMet (um booleano por critério), feedback em português e followUpDrill.'
+      ].join('\n'),
+      check: 'scenario_feedback'
+    },
+    {
+      name: 'scenario_feedback_partial',
+      schema: SCHEMAS.scenario_feedback,
+      user: [
+        `Roleplay em ${lang.target} (A2): aluno fluente mas não respondeu o que foi pedido.`,
+        'Critérios: dizer o nome e o cargo; falar de um projeto; fazer uma pergunta. Aluno só disse "My name is Ana. I am developer.".',
+        'contentScore deve ser menor que languageScore (a tarefa não foi cumprida).'
+      ].join('\n'),
+      check: 'scenario_feedback'
+    }
+  ]
+
+  // Acurácia de correção: um par golden vira uma tarefa de grade_answer.
+  for (const [index, golden] of lang.golden.entries()) {
+    tasks.push({
+      name: `grade_answer_${index + 1}`,
+      schema: SCHEMAS.correction,
+      user: [
+        `Corrija a frase de um aluno de ${lang.target}: "${golden.text}"`,
+        'Devolva corrections (original, corrected, tag, note) e recast.',
+        'Tags em kebab-case, em inglês.'
+      ].join('\n'),
+      check: 'correction',
+      golden
+    })
+  }
+
+  tasks.push({
     name: 'tutor_turn',
     schema: SCHEMAS.correction,
-    user: 'Aluno escreveu: "Yesterday I go to work and I didn\'t took my laptop.". Corrija e devolva recast.'
-  },
-  {
-    name: 'track_plan',
-    schema: SCHEMAS.track_plan,
     user: [
-      'Esboço de trilha de foco para aluno A2: "entrevista para desenvolvedor backend".',
-      '5 lições, cada uma com título, objetivo e 5 palavras-alvo do domínio (em inglês).',
-      'A gramática continua A2; o que muda é o vocabulário e a situação. Traga title, goalTag e lessons.'
-    ].join('\n')
-  },
-  {
-    name: 'scenario_gen',
-    schema: SCHEMAS.scenario_gen,
-    user: [
-      'Crie o roleplay de fechamento da lição "Pergunte sobre a vaga" (A2, entrevista para dev).',
-      'Traga persona (em português), setting (em português), successCriteria (3 a 4, em português) e',
-      'openingLine (a primeira fala do personagem, em inglês, nível A2).'
-    ].join('\n')
-  },
-  {
-    name: 'scenario_feedback',
-    schema: SCHEMAS.scenario_feedback,
-    user: [
-      'Roleplay: entrevistador x aluno A2. Critérios: apresentar trajetória; descrever um projeto com resultado;',
-      'fazer uma pergunta sobre a vaga.',
-      'Transcrição: aluno: "I have background in backend. I maintain two services." tutor: "Nice."',
-      'aluno: "My team ship a new api last month." tutor: "How was the launch?" aluno: "Very good."',
-      'Dê contentScore (0 a 1, só a tarefa), languageScore (0 a 1, só a língua, os erros são articles e',
-      'past-simple), criteriaMet (um booleano por critério), feedback em português e followUpDrill.'
-    ].join('\n')
-  }
-]
+      `Aluno escreveu em ${lang.target}: "${lang.sample}".`,
+      'Corrija como o tutor faria: corrections + recast (a frase reescrita certa).'
+    ].join('\n'),
+    check: 'correction',
+    golden: { text: lang.sample, tag: 'tense|past-simple|agreement', expect: '' }
+  })
+
+  return tasks
+}
+
+// --- Provedores --------------------------------------------------------------
 
 async function ask(user, schema, temperature = 0.3) {
   const prompt = `${SYSTEM}\n\nFormato obrigatório (JSON Schema):\n${JSON.stringify(schema)}\n\nTarefa:\n${user}`
@@ -324,74 +548,223 @@ function extractJson(text) {
   }
 }
 
+const normalize = (value) =>
+  String(value ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\p{L}\p{N}\s]/gu, '')
+    .trim()
+
 /** Checagem mínima de contrato — o app usa zod; aqui só interessa "serveu?". */
-function looksUsable(name, parsed) {
+function looksUsable(task, parsed) {
   if (!parsed || typeof parsed !== 'object') return false
-  if (name === 'curriculum_plan') return Array.isArray(parsed.units) && parsed.units.length >= 2
-  if (name === 'lesson_content')
-    return typeof parsed.explanation === 'string' && Array.isArray(parsed.vocabulary) && parsed.vocabulary.length >= 4
-  if (name === 'exercise_gen') return Array.isArray(parsed.exercises) && parsed.exercises.length >= 4
-  if (name === 'track_plan') {
+  const name = task.name
+
+  if (name === 'placement') return Array.isArray(parsed.questions) && parsed.questions.length >= 6
+  if (name.startsWith('curriculum_plan')) return Array.isArray(parsed.units) && parsed.units.length >= 2
+  if (name.startsWith('lesson_content')) {
+    if (typeof parsed.explanation !== 'string' || parsed.explanation.length < 40) return false
+    if (!Array.isArray(parsed.vocabulary) || parsed.vocabulary.length < 3) return false
+    // M4: exemplo é par {target, native} — {en, pt} não vale mais.
+    return (
+      Array.isArray(parsed.examples) &&
+      parsed.examples.length >= 2 &&
+      parsed.examples.every((example) => typeof example.target === 'string' && typeof example.native === 'string')
+    )
+  }
+  if (name.startsWith('exercise_gen')) {
+    if (!Array.isArray(parsed.exercises) || parsed.exercises.length < 4) return false
+    const focused = parsed.exercises.filter((exercise) => Array.isArray(exercise.targetTags) && exercise.targetTags.length > 0)
+    if (name === 'exercise_gen' && focused.length < 2) return false
+    const order = parsed.exercises.find((exercise) => exercise.type === 'order')
+    if (name === 'exercise_gen_types' && (!order || !Array.isArray(order.tokens) || order.tokens.length === 0)) return false
+    return true
+  }
+  if (name.startsWith('track_plan')) {
     if (typeof parsed.title !== 'string' || !Array.isArray(parsed.lessons)) return false
-    if (parsed.lessons.length < 4) return false
+    if (parsed.lessons.length < 3) return false
     return parsed.lessons.every((lesson) => Array.isArray(lesson.focusVocabulary) && lesson.focusVocabulary.length > 0)
   }
-  if (name === 'scenario_gen') {
+  if (name.startsWith('scenario_gen')) {
     return (
       typeof parsed.persona === 'string' &&
       Array.isArray(parsed.successCriteria) &&
       parsed.successCriteria.length >= 2 &&
-      typeof parsed.openingLine === 'string'
+      typeof parsed.openingLine === 'string' &&
+      parsed.openingLine.trim().length > 0
     )
   }
-  if (name === 'scenario_feedback') {
+  if (name.startsWith('scenario_feedback')) {
     const content = Number(parsed.contentScore)
     const language = Number(parsed.languageScore)
     if (!Number.isFinite(content) || !Number.isFinite(language)) return false
     if (content < 0 || content > 1 || language < 0 || language > 1) return false
-    // o ponto do M3: tarefa e língua são medidas diferentes — um score copiado do
-    // outro significa que o modelo não separou as duas rubricas
-    return content !== language
+    // O ponto do M3: tarefa e língua são medidas diferentes — nota copiada
+    // significa que o modelo não separou as duas rubricas.
+    if (content === language) return false
+    if (name === 'scenario_feedback_partial' && !(content < language)) return false
+    return true
   }
+  // grade_answer_* / tutor_turn
   return Array.isArray(parsed.corrections)
 }
 
-console.log(`\n=== avaliação de IA · ${provider} · ${model} ===`)
-console.log('(a linha de base determinística — banco PT-BR — é verificada por `npm test`)')
+/** Acurácia de correção: pegou a tag esperada e a forma esperada? */
+function correctionAccuracy(parsed, golden) {
+  const corrections = Array.isArray(parsed?.corrections) ? parsed.corrections : []
+  const tags = corrections.map((correction) => normalize(correction.tag))
+  const joined = corrections.map((correction) => normalize(correction.corrected)).join(' | ')
 
-const rows = []
-for (const task of TASKS) {
-  try {
-    const { text, latencyMs } = await ask(task.user, task.schema)
-    const parsed = extractJson(text)
-    const valid = parsed !== null
-    const usable = looksUsable(task.name, parsed)
-    rows.push({ task: task.name, valid, usable, latencyMs })
-    console.log(
-      `${valid && usable ? 'ok  ' : usable ? 'warn' : 'FAIL'} ${task.name.padEnd(16)} ${String(latencyMs).padStart(6)} ms  ${
-        valid ? '' : '(json inválido)'
-      }`
-    )
-  } catch (error) {
-    rows.push({ task: task.name, valid: false, usable: false, latencyMs: 0 })
-    console.log(`ERR  ${task.name.padEnd(16)} ${String(error.message).slice(0, 90)}`)
+  const tagAlternatives = String(golden.tag).split('|').map((tag) => normalize(tag))
+  const tagHit = tagAlternatives.some((tag) => tags.some((entry) => entry.includes(tag)))
+
+  const forms = String(golden.expect || '')
+    .split('|')
+    .map((entry) => normalize(entry))
+    .filter(Boolean)
+  const formHit = forms.length === 0 ? corrections.length > 0 : forms.some((form) => joined.includes(form))
+
+  return { tagHit, formHit, pass: tagHit && formHit, found: corrections.length }
+}
+
+/** Escrita do idioma: RTL precisa vir em árabe, CJK precisa vir segmentável. */
+function scriptCheck(task, parsed) {
+  if (!parsed || typeof parsed !== 'object') return null
+  const sample =
+    [
+      ...(Array.isArray(parsed.examples) ? parsed.examples.map((example) => example.target) : []),
+      ...(Array.isArray(parsed.vocabulary) ? parsed.vocabulary.map((item) => item.example) : []),
+      ...(Array.isArray(parsed.questions) ? parsed.questions.map((question) => question.prompt) : []),
+      typeof parsed.openingLine === 'string' ? parsed.openingLine : '',
+      ...(Array.isArray(parsed.exercises) ? parsed.exercises.map((exercise) => exercise.prompt) : [])
+    ]
+      .filter(Boolean)
+      .join(' ') || ''
+
+  if (!sample) return null
+
+  if (LANG.direction === 'rtl') {
+    const arabic = (sample.match(/[\u0600-\u06FF]/g) || []).length
+    return { ok: arabic >= 3, detail: `${arabic} chars árabes` }
   }
+  if (!LANG.spaced) {
+    const kana = (sample.match(/[\u3040-\u30FF]/g) || []).length
+    const han = (sample.match(/[\u4E00-\u9FFF]/g) || []).length
+    const ok = kana + han >= 3
+    return { ok, detail: `${kana} kana / ${han} han` }
+  }
+  return { ok: true, detail: null }
 }
 
-const total = rows.length
-const validCount = rows.filter((row) => row.valid).length
-const usableCount = rows.filter((row) => row.usable).length
-const latencies = rows.map((row) => row.latencyMs).filter((value) => value > 0)
+// --- Execução ----------------------------------------------------------------
 
-console.log('\n=== resumo ===')
-console.log(`JSON parseável : ${validCount}/${total} (${Math.round((validCount / total) * 100)}%)`)
-console.log(`contrato ok    : ${usableCount}/${total} (${Math.round((usableCount / total) * 100)}%)`)
-if (latencies.length > 0) {
-  const sorted = [...latencies].sort((a, b) => a - b)
-  console.log(`latência       : p50 ${sorted[Math.floor(sorted.length / 2)]} ms · máx ${sorted[sorted.length - 1]} ms`)
+async function runOffline() {
+  const { spawnSync } = await import('node:child_process')
+
+  console.log(`\n=== linha de base determinística · sem IA (${langCode}) ===`)
+  console.log('A passada offline (bancos de interferência, FSRS, correção, i18n) roda em `npm test`.\n')
+
+  const result = spawnSync('npx', ['vitest', 'run', '--reporter=dot'], {
+    encoding: 'utf8',
+    cwd: process.cwd()
+  })
+
+  // O sumário do vitest é a resposta: "quantos contratos determinísticos passam".
+  const summary = (result.stdout || '')
+    .split('\n')
+    .filter((line) => /Test Files|Tests\s|Duration/.test(line))
+    .join('\n')
+
+  console.log(summary || result.stdout || result.stderr)
+
+  if (result.status === 0) {
+    console.log(
+      '\nBaseline offline íntegro: banco de interferência, FSRS, correção objetiva,\nsegmentação CJK, i18n e integração do loop passam sem provedor.\n'
+    )
+  } else {
+    console.log('\nA linha de base offline quebrou — nada de medir IA antes de consertá-la.\n')
+  }
+
+  process.exit(result.status ?? 0)
 }
-console.log(
-  usableCount < total
-    ? '\nAbaixo de 100% no contrato: confira o modelo (Modelos pequenos precisam de schema + retentativa) ou ative o fallback determinístico.\n'
-    : '\nContratos íntegros: o app não precisará de fallback nesta rodada.\n'
-)
+
+async function main() {
+  if (offline) return runOffline()
+
+  const tasks = tasksFor(LANG)
+  const subset = repeatLimit ? tasks.slice(0, repeatLimit) : tasks
+
+  console.log(`\n=== avaliação de IA · ${provider} · ${model} · idioma ${langCode} (${LANG.target}) ===`)
+  console.log(`${subset.length} tarefas golden (a linha de base determinística é o --offline)\n`)
+
+  const rows = []
+
+  for (const task of subset) {
+    try {
+      const { text, latencyMs } = await ask(task.user, task.schema)
+      const parsed = extractJson(text)
+      const valid = parsed !== null
+      const usable = valid && looksUsable(task, parsed)
+      const accuracy = task.check === 'correction' && valid ? correctionAccuracy(parsed, task.golden) : null
+      const script = valid ? scriptCheck(task, parsed) : null
+
+      rows.push({ task: task.name, valid, usable, latencyMs, accuracy, script })
+
+      const status = !valid ? 'FAIL' : !usable ? 'warn' : accuracy && !accuracy.pass ? 'miss' : script && !script.ok ? 'warn' : 'ok  '
+      const extras = [
+        valid ? '' : '(json inválido)',
+        valid && !usable ? '(contrato)' : '',
+        accuracy ? `(tag ${accuracy.tagHit ? '✓' : '✗'} forma ${accuracy.formHit ? '✓' : '✗'})` : '',
+        script && !script.ok ? `(escrita: ${script.detail})` : ''
+      ]
+        .filter(Boolean)
+        .join(' ')
+
+      console.log(`${status} ${task.name.padEnd(26)} ${String(latencyMs).padStart(6)} ms  ${extras}`)
+    } catch (error) {
+      rows.push({ task: task.name, valid: false, usable: false, latencyMs: 0, accuracy: null, script: null })
+      console.log(`ERR  ${task.name.padEnd(26)} ${String(error.message).slice(0, 90)}`)
+    }
+  }
+
+  const total = rows.length
+  const validCount = rows.filter((row) => row.valid).length
+  const usableCount = rows.filter((row) => row.usable).length
+  const correctionRows = rows.filter((row) => row.accuracy)
+  const tagHits = correctionRows.filter((row) => row.accuracy.tagHit).length
+  const formHits = correctionRows.filter((row) => row.accuracy.formHit).length
+  const scriptRows = rows.filter((row) => row.script)
+  const scriptOk = scriptRows.filter((row) => row.script.ok).length
+  const latencies = rows.map((row) => row.latencyMs).filter((value) => value > 0)
+
+  console.log('\n=== resumo ===')
+  console.log(`idioma         : ${langCode} (${LANG.target}) — ${LANG.direction}, ${LANG.script}`)
+  console.log(`JSON parseável : ${validCount}/${total} (${Math.round((validCount / total) * 100)}%)`)
+  console.log(`contrato ok    : ${usableCount}/${total} (${Math.round((usableCount / total) * 100)}%)`)
+  if (correctionRows.length > 0) {
+    console.log(
+      `acurácia       : tag ${tagHits}/${correctionRows.length} · forma ${formHits}/${correctionRows.length} (${Math.round(
+        (correctionRows.filter((row) => row.accuracy.pass).length / correctionRows.length) * 100
+      )}% dos itens golden)`
+    )
+  }
+  if (scriptRows.length > 0) {
+    console.log(`escrita        : ${scriptOk}/${scriptRows.length} tarefas no script do idioma`)
+  }
+  if (latencies.length > 0) {
+    const sorted = [...latencies].sort((a, b) => a - b)
+    console.log(`latência       : p50 ${sorted[Math.floor(sorted.length / 2)]} ms · máx ${sorted[sorted.length - 1]} ms`)
+  }
+
+  console.log(
+    usableCount < total
+      ? '\nAbaixo de 100% no contrato: confira o modelo (pequeno precisa de schema + retentativa) ou use o fallback determinístico — que só existe para inglês.\n'
+      : '\nContratos íntegros: o app não precisará de fallback nesta rodada.\n'
+  )
+}
+
+main().catch((error) => {
+  console.error(`\nERRO: ${error.message}\n`)
+  process.exit(1)
+})

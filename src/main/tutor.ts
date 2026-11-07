@@ -44,7 +44,9 @@ import {
 import { correctionSetSchema, conversationSummarySchema } from '../core/schemas'
 import { currentModel, generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
-import { profileInterferenceRules } from './locale'
+import { emitStudentEvent } from './events'
+import { profileInterferenceRules, profileNativeLang } from './locale'
+import { runtimeText } from '../core/runtime-text'
 import { errorHints, recordCorrections } from './notebook'
 import { cardsForErrorsFrom } from './review'
 import { trackContextOf } from './tracks'
@@ -710,7 +712,13 @@ export function buildRecap(
     practice: extra.practice,
     levelChange,
     scenario: extra.scenario ?? null,
-    message: recapMessage(corrections, cardsCreated, levelChange, extra.scenario ?? null)
+    message: recapMessage(
+      corrections,
+      cardsCreated,
+      levelChange,
+      extra.scenario ?? null,
+      profileNativeLang()
+    )
   }
 }
 
@@ -718,18 +726,24 @@ function recapMessage(
   corrections: Correction[],
   cardsCreated: number,
   levelChange: { from: CefrLevel; to: CefrLevel } | null,
-  scenario: ScenarioFeedbackView | null = null
+  scenario: ScenarioFeedbackView | null = null,
+  lang: string | null = 'pt-BR'
 ): string {
   const tags = tagsOf(corrections)
   const parts = [
     corrections.length === 0
-      ? 'Nenhuma correção de língua nesta sessão — você se saiu bem.'
-      : `${corrections.length} correções${tags.length > 0 ? `, nas áreas ${tags.join(', ')}` : ''}.`,
+      ? runtimeText(lang, 'recap.noCorrections')
+      : `${runtimeText(lang, 'recap.corrections', { count: corrections.length })}${
+          tags.length > 0 ? runtimeText(lang, 'recap.areas', { tags: tags.join(', ') }) : ''
+        }.`,
     scenario
-      ? `Cenário: tarefa ${Math.round(scenario.contentScore * 100)}% · língua ${Math.round(scenario.languageScore * 100)}%.`
+      ? runtimeText(lang, 'recap.scenario', {
+          content: Math.round(scenario.contentScore * 100),
+          language: Math.round(scenario.languageScore * 100)
+        })
       : null,
-    cardsCreated > 0 ? `${cardsCreated} card(s) novos na fila de revisão.` : null,
-    levelChange ? `Seu nível foi reestimado de ${levelChange.from} para ${levelChange.to}.` : null
+    cardsCreated > 0 ? runtimeText(lang, 'recap.cards', { count: cardsCreated }) : null,
+    levelChange ? runtimeText(lang, 'recap.level', { from: levelChange.from, to: levelChange.to }) : null
   ]
 
   return parts.filter(Boolean).join(' ')
@@ -746,6 +760,8 @@ export function closeConversation(profileId: number, conversationId: number): Re
     .set({ closedAt: now })
     .where(eq(schema.conversations.id, conversationId))
     .run()
+
+  emitStudentEvent('conversation-closed', String(conversationId))
 
   getDb()
     .update(schema.studySessions)

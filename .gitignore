@@ -8,8 +8,10 @@ dist/
 dist-electron/
 out/
 release/
-build/
 *.tsbuildinfo
+
+# build/ NÃO é ignorado: é o buildResources do electron-builder (icon.svg + PNGs
+# gerados), necessário num clone limpo para o `npm run dist` funcionar.
 
 # Databases / local data
 *.db

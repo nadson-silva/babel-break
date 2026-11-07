@@ -12,6 +12,15 @@ export function profileLocale(): PromptLocale {
   return promptLocale(profile.targetLang, profile.nativeLang)
 }
 
+/**
+ * Idioma das explicações do perfil (M5): o idioma em que o main escreve texto
+ * de runtime — rótulos de intervalo do FSRS, recapitulação de fechamento,
+ * cards e mensagens de erro.
+ */
+export function profileNativeLang(): string {
+  return getDefaultProfile().nativeLang
+}
+
 export function profileTargetMeta(): LanguageMeta {
   return languageMeta(getDefaultProfile().targetLang)
 }

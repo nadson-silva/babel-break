@@ -8,6 +8,7 @@
 import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import type { Correction, GuidedSession, GuidedStep, RecapView, ScenarioFeedbackView } from '../shared/types'
 import { pickRecommendationOrigin } from '../core/tracks'
+import { emitStudentEvent } from './events'
 import { getDb, schema } from './db'
 import { openLesson } from './learning'
 import { dueCount } from './review'
@@ -362,6 +363,10 @@ export async function finishGuidedSession(profileId: number, input: GuidedFinish
     })
     .where(eq(schema.studySessions.id, row.id))
     .run()
+
+  // M5: o fim de uma sessão guiada é o gatilho natural do aquecimento ocioso —
+  // é aqui que o app sabe qual lição vem depois.
+  emitStudentEvent('lesson-finished', summary.lessonId ? String(summary.lessonId) : undefined)
 
   return {
     id: row.id,

@@ -1,7 +1,10 @@
 import { app, BrowserWindow, shell } from 'electron'
 import path from 'node:path'
 import { closeDatabase, initDatabase } from './db'
+import { emitStudentEvent } from './events'
 import { registerIpcHandlers } from './ipc'
+import { startPrewarmWatch, stopPrewarmWatch } from './prewarm'
+import { startProviderWatch, stopProviderWatch } from './provider-status'
 
 app.setName('language-teacher')
 
@@ -66,6 +69,12 @@ if (!gotLock) {
     registerIpcHandlers()
     createWindow()
 
+    // M5: monitor de disponibilidade da IA (banner offline) + fila ociosa de
+    // pré-geração. Os dois são supérfluos se o app fechar — nada bloqueia o quit.
+    startProviderWatch()
+    startPrewarmWatch()
+    emitStudentEvent('app-ready')
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow()
     })
@@ -76,6 +85,8 @@ if (!gotLock) {
   })
 
   app.on('before-quit', () => {
+    stopProviderWatch()
+    stopPrewarmWatch()
     closeDatabase()
   })
 }

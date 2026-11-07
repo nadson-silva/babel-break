@@ -156,6 +156,12 @@ export function LessonsScreen({ settings, onOpenLesson, onOpenSettings }: Lesson
                         <div className="truncate text-sm font-medium">{lesson.title}</div>
                         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-faint">
                           <span>{statusLabel(lesson)}</span>
+                          {/* M5: conteúdo já no banco = abre sem IA e sem espera. */}
+                          {lesson.hasContent && (
+                            <span className="rounded-full bg-panel px-1.5 py-0.5 text-[10px] text-faint">
+                              {t.lessons.readyOffline}
+                            </span>
+                          )}
                           {lesson.status === 'completed' && lesson.score != null && (
                             <span className="rounded-full bg-accent-soft px-1.5 py-0.5 text-accent">
                               {t.lessons.score} {Math.round(lesson.score * 100)}%

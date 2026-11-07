@@ -3,6 +3,7 @@ import type { JSX } from 'react'
 import type { ExerciseType, ExerciseView, GradeFeedback } from '../../../shared/types'
 import { t } from '../i18n'
 import { targetIsCjk, targetLabel, targetLanguage } from '../lang'
+import { ReportButton } from './ReportButton'
 
 interface ExercisePlayerProps {
   exercises: ExerciseView[]
@@ -159,6 +160,12 @@ export function ExercisePlayer({
       <p className="mt-2 text-lg font-medium leading-relaxed text-ink" dir="auto" lang={targetLanguage()}>
         {exercise.prompt}
       </p>
+
+      {/* M5: gabarito errado / enunciado confuso tem consequência imediata —
+          o exercício sai da prática e a fila de aquecimento repõe o item. */}
+      <div className="mt-2">
+        <ReportButton kind="exercise" targetId={exercise.id} text={exercise.prompt} compact />
+      </div>
 
       <div className="mt-5">
         {exercise.type === 'multiple_choice' && (

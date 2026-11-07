@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import type { GuidedSession, LanguageOption, ProfileState, SettingsPayload } from '../../shared/types'
+import type { GuidedSession, LanguageOption, ProfileState, ProviderStatus, SettingsPayload } from '../../shared/types'
 import { Sidebar, type View } from './components/Sidebar'
 import { t, setUiLanguage } from './i18n'
 import { setLanguageOptions, setNativeLanguage, setTargetLanguage } from './lang'
@@ -9,6 +9,7 @@ import { HomeScreen } from './screens/HomeScreen'
 import { LessonScreen } from './screens/LessonScreen'
 import { LessonsScreen } from './screens/LessonsScreen'
 import { NotebookScreen } from './screens/NotebookScreen'
+import { ProgressScreen } from './screens/ProgressScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
@@ -45,6 +46,9 @@ export default function App(): JSX.Element {
   const [dueCount, setDueCount] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
   const [error, setError] = useState<string | null>(null)
+  // M5: disponibilidade da IA em runtime — o banner e o chip leem daqui, e o
+  // main empurra quando o estado muda (nada de polling no renderer).
+  const [aiStatus, setAiStatus] = useState<ProviderStatus | null>(null)
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -67,6 +71,25 @@ export default function App(): JSX.Element {
   useEffect(() => {
     void reload()
   }, [reload])
+
+  useEffect(() => {
+    let alive = true
+    void window.api.provider
+      .status()
+      .then((status) => {
+        if (alive) setAiStatus(status)
+      })
+      .catch(() => undefined)
+
+    const unsubscribe = window.api.provider.onStatus((status) => {
+      if (alive) setAiStatus(status)
+    })
+
+    return () => {
+      alive = false
+      unsubscribe()
+    }
+  }, [])
 
   // M4: idioma da interface e idioma ensinado viram estado de runtime antes de
   // qualquer tela renderizar — os textos (`t`) e o `<TargetText>` leem daqui.
@@ -156,6 +179,7 @@ export default function App(): JSX.Element {
         onNavigate={navigate}
         settings={settings}
         dueCount={guided || activeLessonId != null ? 0 : dueCount}
+        aiStatus={aiStatus}
       />
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
         {guided ? (
@@ -175,6 +199,7 @@ export default function App(): JSX.Element {
           <HomeScreen
             key={`home-${refreshKey}`}
             settings={settings}
+            aiStatus={aiStatus}
             onOpenLesson={openLesson}
             onOpenCatalog={() => navigate('lessons')}
             onOpenTracks={() => navigate('tracks')}
@@ -183,6 +208,7 @@ export default function App(): JSX.Element {
             onOpenScenario={openScenario}
             onOpenReview={() => navigate('review')}
             onOpenNotebook={() => navigate('notebook')}
+            onOpenProgress={() => navigate('progress')}
             onStartGuided={startGuided}
             onResumeGuided={startGuided}
           />
@@ -214,6 +240,8 @@ export default function App(): JSX.Element {
           <ReviewScreen key={`review-${refreshKey}`} onChanged={refreshBadges} />
         ) : view === 'notebook' ? (
           <NotebookScreen key={`notebook-${refreshKey}`} />
+        ) : view === 'progress' ? (
+          <ProgressScreen key={`progress-${refreshKey}`} onOpenSettings={() => navigate('settings')} />
         ) : (
           <SettingsScreen
             settings={settings}

@@ -4,6 +4,7 @@ import type { CardView, LessonDetail, LessonResultView, ReviewRating } from '../
 import { t } from '../i18n'
 import { nativeLabel } from '../lang'
 import { ExercisePlayer } from '../components/ExercisePlayer'
+import { ReportButton } from '../components/ReportButton'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { TargetText } from '../components/TargetText'
 
@@ -295,6 +296,11 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
                 <p className="mt-1.5 text-sm font-medium text-ink">{content.objective}</p>
                 <div className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-muted">
                   {content.explanation}
+                </div>
+                {/* M5: "essa explicação está ruim" → o cache envelhece e a
+                    próxima abertura reescreve o conteúdo da lição. */}
+                <div className="mt-3 border-t border-line-soft pt-2">
+                  <ReportButton kind="lesson_content" targetId={detail.lesson.id} text={content.explanation} compact />
                 </div>
               </section>
 

@@ -19,6 +19,7 @@ const MEMORY_TABLES: Array<[name: string, table: SQLiteTable]> = [
   ['errors', schema.errors],
   ['attempts', schema.attempts],
   ['scenarioRuns', schema.scenarioRuns],
+  ['contentReports', schema.contentReports],
   ['messages', schema.messages],
   ['conversations', schema.conversations],
   ['studySessions', schema.studySessions],

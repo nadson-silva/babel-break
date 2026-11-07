@@ -36,6 +36,7 @@ import { deterministicContentSupported } from '../core/languages'
 import { promptLocale, trackPlanPrompt } from '../core/prompts'
 import { trackPlanSchema } from '../core/schemas'
 import { generateStructured } from './ai'
+import { emitStudentEvent } from './events'
 import { getDb, getDefaultProfile, schema } from './db'
 import { getSettings } from './settings'
 
@@ -407,6 +408,9 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
       .where(eq(schema.focusTracks.id, trackId))
       .run()
   })
+
+  // Trilha aprovada = lições novas que o aluno provavelmente vai abrir: vale aquecer.
+  emitStudentEvent('track-approved', String(trackId))
 
   return trackView(requireTrack(trackId, profileId), profileId)
 }

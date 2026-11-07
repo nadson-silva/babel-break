@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import type { GuidedSession, HomeState, LessonSummary, SettingsPayload } from '../../../shared/types'
+import type { GuidedSession, HomeState, LessonSummary, ProviderStatus, SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n'
+import { AiStatusBanner } from '../components/AiStatus'
 import { GUIDED_ORDER, guidedStepPosition, guidedStepTitle } from '../components/guidedSteps'
 
 interface HomeScreenProps {
   settings: SettingsPayload
+  /** M5: sonda de disponibilidade da IA (banner de modo offline). */
+  aiStatus?: ProviderStatus | null
   onOpenLesson: (lessonId: number) => void
   onOpenCatalog: () => void
   onOpenTracks: () => void
@@ -15,6 +18,8 @@ interface HomeScreenProps {
   onOpenScenario: (input: { lessonId?: number; topic?: string }) => void
   onOpenReview: () => void
   onOpenNotebook: () => void
+  /** Abre o painel de Progresso (M5). */
+  onOpenProgress: () => void
   onStartGuided: (session: GuidedSession) => void
   onResumeGuided: (session: GuidedSession) => void
 }
@@ -70,6 +75,7 @@ function EntryCard({
 
 export function HomeScreen({
   settings,
+  aiStatus = null,
   onOpenLesson,
   onOpenCatalog,
   onOpenTracks,
@@ -78,6 +84,7 @@ export function HomeScreen({
   onOpenScenario,
   onOpenReview,
   onOpenNotebook,
+  onOpenProgress,
   onStartGuided,
   onResumeGuided
 }: HomeScreenProps): JSX.Element {
@@ -193,6 +200,8 @@ export function HomeScreen({
               </button>
             </div>
           )}
+
+          {aiStatus && <AiStatusBanner status={aiStatus} onOpenSettings={onOpenSettings} />}
 
           {!model && (
             <div className="flex items-center justify-between gap-4 rounded-xl border border-warn/30 bg-warn-soft px-4 py-3 text-xs text-warn">
@@ -389,12 +398,12 @@ export function HomeScreen({
                     onClick={onOpenNotebook}
                   />
                   <EntryCard
-                    title={t.home.progress}
+                    title={t.nav.progress}
                     body={t.home.completed
                       .replace('{done}', String(done))
                       .replace('{total}', String(total))}
-                    cta={t.home.catalogCta}
-                    onClick={onOpenCatalog}
+                    cta={t.progress.title}
+                    onClick={onOpenProgress}
                   />
                 </div>
               </section>

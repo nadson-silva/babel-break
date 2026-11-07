@@ -111,7 +111,8 @@ function rowsToNotebookRows(rows: ErrorRow[]): NotebookRow[] {
     note: row.note,
     occurrences: row.occurrences,
     lastSeen: row.lastSeenAt || row.createdAt,
-    resolvedAt: row.resolvedAt
+    resolvedAt: row.resolvedAt,
+    disputedAt: row.disputedAt
   }))
 }
 
@@ -190,7 +191,8 @@ export function notebookView(profileId: number): NotebookView {
           note: row.note,
           lastSeenAt: row.lastSeenAt || row.createdAt,
           category: row.category,
-          source: row.source
+          source: row.source,
+          disputed: row.disputedAt != null
         }))
     })
   }
@@ -214,6 +216,7 @@ export function notebookView(profileId: number): NotebookView {
     tags,
     openCount: rows.filter((row) => row.resolvedAt === null).length,
     resolvedCount: rows.filter((row) => row.resolvedAt !== null).length,
+    disputedCount: rows.filter((row) => row.disputedAt !== null).length,
     bank: bankEntries(bankRules),
     bankHits: Number(bankHits),
     bankPair
@@ -269,6 +272,8 @@ export function recurringErrors(profileId: number, minOccurrences = 2, limit = 1
       and(
         eq(schema.errors.profileId, profileId),
         isNull(schema.errors.resolvedAt),
+        // M5: correção que o aluno marcou como injusta não vira card nem foco.
+        isNull(schema.errors.disputedAt),
         gte(schema.errors.occurrences, minOccurrences)
       )
     )

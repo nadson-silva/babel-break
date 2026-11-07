@@ -1,11 +1,23 @@
 import { z } from 'zod'
 import { getProvider } from './providers'
 import { getSettings } from './settings'
+import { profileNativeLang } from './locale'
+import { runtimeText } from '../core/runtime-text'
 
 export interface StructuredRequest {
   system: string
   user: string
   temperature?: number
+}
+
+/**
+ * Chamadas de IA em andamento (M5). A pré-geração usa isto para nunca competir
+ * com o aluno: se há uma geração viva na tela, o ciclo ocioso espera.
+ */
+let inFlight = 0
+
+export function aiInFlight(): number {
+  return inFlight
 }
 
 export function currentModel(): string {
@@ -16,9 +28,7 @@ export function currentModel(): string {
 export function ensureModelConfigured(): string {
   const model = currentModel()
   if (!model) {
-    throw new Error(
-      'Nenhum modelo configurado. Abra Configurações, escolha um provedor e um modelo antes de gerar conteúdo.'
-    )
+    throw new Error(runtimeText(profileNativeLang(), 'error.noModel'))
   }
   return model
 }
@@ -70,6 +80,7 @@ export async function generateStructured<T>(
     let raw: string
 
     try {
+      inFlight += 1
       raw = await provider.generate({
         model,
         messages: [
@@ -84,6 +95,8 @@ export async function generateStructured<T>(
       correction =
         '\n\nA tentativa anterior falhou antes de gerar a resposta. Gere o objeto JSON completo agora.'
       continue
+    } finally {
+      inFlight -= 1
     }
 
     if (!raw.trim()) {

@@ -30,6 +30,7 @@ import { scenarioFeedbackSchema, scenarioSchema, type ScenarioOutput } from '../
 import { detectBucket, fallbackScenario, scenarioFeedbackFrom } from '../core/tracks'
 import { phraseCard } from '../core/srs'
 import { currentModel, generateStructured } from './ai'
+import { emitStudentEvent } from './events'
 import { getDb, getDefaultProfile, schema } from './db'
 import { errorHints } from './notebook'
 import { createCard } from './review'
@@ -449,6 +450,8 @@ export async function finishScenarioRun(
     })
     .returning()
     .get()
+
+  emitStudentEvent('scenario-finished', conversation.lessonId ? String(conversation.lessonId) : undefined)
 
   return {
     runId: run.id,

@@ -1,6 +1,7 @@
 {
   "name": "language-teacher",
   "productName": "Language Teacher",
+  "desktopName": "com.nadson.language-teacher",
   "version": "0.1.0",
   "description": "Tutor de idiomas local-first com IA (qualquer idioma, interface PT-BR/EN)",
   "main": "./out/main/index.js",
@@ -13,12 +14,17 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist": "electron-vite build && electron-builder --linux",
+    "dist:appimage": "electron-vite build && electron-builder --linux AppImage",
+    "dist:deb": "electron-vite build && electron-builder --linux deb",
+    "dist:dir": "electron-vite build && electron-builder --linux dir",
     "start": "electron .",
     "preview": "electron-vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:watch": "vitest",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "icons": "rsvg-convert -w 512 -h 512 build/icon.svg -o build/icon.png && for s in 16 24 32 48 64 128 256 512; do rsvg-convert -w ${s} -h ${s} build/icon.svg -o build/icons/${s}x${s}.png; done"
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
@@ -36,6 +42,7 @@
     "@vitejs/plugin-react": "^6.2.1",
     "drizzle-kit": "^0.31.11",
     "electron": "^45.2.3",
+    "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",

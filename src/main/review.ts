@@ -27,7 +27,7 @@ import {
   type CardPayload
 } from '../core/srs'
 import { recurringErrors } from './notebook'
-import { profileLocale } from './locale'
+import { profileLocale, profileNativeLang } from './locale'
 import { getDb, schema } from './db'
 
 type CardRow = typeof schema.cards.$inferSelect
@@ -36,21 +36,22 @@ const QUEUE_LIMIT = 20
 
 function toView(row: CardRow, now = Date.now()): CardView {
   const payload = parseContent(row.content)
+  const lang = profileNativeLang()
 
   return {
     id: row.id,
     kind: (row.kind as CardView['kind']) ?? 'vocab',
     front: payload?.front ?? row.content,
     back: payload?.back ?? '',
-    hint: payload ? cardHint(payload) ?? null : null,
+    hint: payload ? cardHint(payload, profileLocale()) ?? null : null,
     tag: payload?.tag ?? null,
     lessonId: row.lessonId,
     state: (row.state as CardView['state']) ?? 'new',
     due: row.due,
-    dueLabel: dueLabel(row.due, now),
+    dueLabel: dueLabel(row.due, now, lang),
     reps: row.reps,
     lapses: row.lapses,
-    intervals: previewIntervals(row.schedule, new Date(now))
+    intervals: previewIntervals(row.schedule, new Date(now), lang)
   }
 }
 
@@ -262,7 +263,7 @@ export function answerReview(profileId: number, cardId: number, rating: ReviewRa
   return {
     cardId,
     rating,
-    nextDueLabel: dueLabel(outcome.due, now.getTime()),
+    nextDueLabel: dueLabel(outcome.due, now.getTime(), profileNativeLang()),
     dueCount: dueCount(profileId),
     reviewedToday: Number(
       db

@@ -1,3 +1,9 @@
+import type { ReportEffect, ReportKind, ReportReason } from './report-reasons'
+
+// Reexport para quem importa a superfície inteira de `shared/types` (preload e
+// telas): os tipos de report continuam com uma única fonte em `report-reasons`.
+export type { ReportEffect, ReportKind, ReportReason } from './report-reasons'
+
 export type ProviderId = 'gemini' | 'ollama'
 
 export type CorrectionStyle = 'recast' | 'explicit' | 'both'
@@ -11,6 +17,8 @@ export interface AppSettings {
   focusMix: number
   /** Idioma da interface (M4): 'pt-BR' (padrão) | 'en'. */
   uiLang: string
+  /** M5: pré-gerar o próximo conteúdo provável quando o app está ocioso. */
+  pregenerate: boolean
 }
 
 /**
@@ -476,6 +484,8 @@ export interface NotebookExample {
   category: string
   /** Quem corrigiu: banco PT-BR, IA ou corretor local do exercício. */
   source: string | null
+  /** M5: o aluno marcou esta correção como injusta (sai do foco das lições). */
+  disputed: boolean
 }
 
 export interface NotebookTag {
@@ -490,6 +500,8 @@ export interface NotebookView {
   tags: NotebookTag[]
   openCount: number
   resolvedCount: number
+  /** Correções disputadas: continua no caderno, mas o app parou de usá-las. */
+  disputedCount: number
   /** Banco de interferência do par nativo→alvo (referência + fixtures). */
   bank: { tag: string; wrong: string; right: string; note: string }[]
   /** Quantas ocorrências o app já corrigiu via banco, sem gastar token. */
@@ -546,3 +558,185 @@ export interface GuidedSession {
   isScenario: boolean
 }
 
+
+// --- M5: produto (dashboard, cache, offline, reportar conteúdo ruim) ---------
+//
+// Os tipos de report (kind/motivo/efeito) moram em `./report-reasons`: o menu do
+// renderer e o efeito no processo main precisam das MESMAS chaves.
+
+
+/**
+ * Reportar conteúdo ruim (PLANO §11: "botão 'essa correção foi injusta' que
+ * recalibra"). Cada tipo tem um efeito real sobre o modelo do aluno — ver
+ * `core/reports.ts`.
+ */
+export interface ReportInput {
+  kind: ReportKind
+  /** Id do alvo (exercício, lição, erro do caderno, trilha, conversa). */
+  targetId: number | null
+  reason: ReportReason
+  note?: string
+  /** Snapshot do conteúdo reportado: o banco é o registro, não a UI. */
+  context?: { text?: string; replacement?: string; tag?: string }
+}
+
+export interface ReportItemView {
+  id: number
+  kind: ReportKind
+  targetId: number | null
+  reason: ReportReason
+  note: string | null
+  effect: ReportEffect
+  /** Rótulo do alvo no momento do report (título da lição, tag do erro…). */
+  targetLabel: string | null
+  /** Snapshot do conteúdo reportado (o trecho que o aluno achou ruim). */
+  text: string | null
+  replacement: string | null
+  createdAt: number
+  undoneAt: number | null
+}
+
+export interface ReportsSummary {
+  total: number
+  byKind: { kind: ReportKind; count: number }[]
+  recent: ReportItemView[]
+}
+
+export interface ProviderStatus {
+  provider: ProviderId
+  model: string
+  /** 'ok' | sem modelo | sem chave | provedor inacessível | sondando. */
+  state: 'ok' | 'no-model' | 'no-key' | 'unreachable' | 'probing'
+  reachable: boolean
+  /** true = roda na máquina (Ollama): funciona sem internet; false = nuvem. */
+  local: boolean
+  detail: string | null
+  latencyMs: number | null
+  checkedAt: number | null
+}
+
+export interface CacheStats {
+  /** Lições com conteúdo salvo (abrem offline, sem gastar token). */
+  lessonsCached: number
+  lessonsTotal: number
+  /** Lições aquecidas pela pré-geração, não por abertura do aluno. */
+  prewarmedLessons: number
+  exercisesCached: number
+  /** Exercícios removidos por report de conteúdo ruim. */
+  exercisesHidden: number
+  scenariosCached: number
+  dbBytes: number
+}
+
+export type StudyKind = 'lesson' | 'conversation' | 'guided' | 'review'
+
+export interface PrewarmOutcome {
+  at: number
+  lessonId: number | null
+  lessonTitle: string | null
+  /** O que foi aquecido nesta rodada. */
+  warmed: { content: number; exercises: number; scenarios: number }
+  /** 'ai' | 'fallback' | 'skip' (nada a fazer) | 'unavailable' (IA fora). */
+  source: 'ai' | 'fallback' | 'skip' | 'unavailable'
+  detail: string | null
+}
+
+/** Resultado de um ciclo de aquecimento (o `attempted` conta itens da fila). */
+export interface PrewarmCycleOutcome extends PrewarmOutcome {
+  attempted: number
+}
+
+export interface PrewarmState extends CacheStats {
+  enabled: boolean
+  running: boolean
+  lastOutcome: PrewarmOutcome | null
+  ai: ProviderStatus
+}
+
+export interface DashboardActivityDay {
+  /** 'aaaa-mm-dd' no fuso local. */
+  day: string
+  minutes: number
+  exercises: number
+  reviews: number
+}
+
+export interface DashboardTime {
+  totalMinutes: number
+  last7DaysMinutes: number
+  last30DaysMinutes: number
+  /** Dias distintos com prática — substitui streak: nada a quebrar. */
+  practiceDays: number
+  daysSinceLastActivity: number | null
+  lastActivityAt: number | null
+  perDay: DashboardActivityDay[]
+  byKind: { kind: StudyKind; minutes: number; sessions: number }[]
+}
+
+export interface DashboardLessons {
+  completed: number
+  inProgress: number
+  total: number
+  averageScore: number | null
+  cached: number
+  prewarmed: number
+}
+
+export interface VocabularyCardView {
+  term: string
+  translation: string
+  reps: number
+  lapses: number
+  stability: number
+  /** Estimativa de retenção do FSRS agora (0–1), quando o card já foi revisado. */
+  retention: number | null
+}
+
+export interface DashboardVocabulary {
+  total: number
+  fresh: number
+  learning: number
+  /** Cards em revisão espaçada consolidada (state 'review'). */
+  mastered: number
+  due: number
+  reviews30Days: number
+  /** Fração das revisões dos últimos 30 dias que não foram "de novo". */
+  passRate: number | null
+  strongest: VocabularyCardView[]
+}
+
+export interface DashboardErrorInsight {
+  open: number
+  resolved: number
+  /** Correções que o aluno marcou como injustas (saem do foco das lições). */
+  disputed: number
+  bankHits: number
+  resolvedRate: number | null
+  topTags: { tag: string; occurrences: number; lastSeenAt: number; disputed: boolean }[]
+}
+
+export interface DashboardTrack {
+  id: number
+  title: string
+  completed: number
+  total: number
+  scenarios: number
+  avgContentScore: number | null
+  avgLanguageScore: number | null
+  lastActivityAt: number | null
+}
+
+export interface DashboardView {
+  generatedAt: number
+  profile: ProfileView
+  skills: SkillEstimate[]
+  lessons: DashboardLessons
+  time: DashboardTime
+  vocabulary: DashboardVocabulary
+  errors: DashboardErrorInsight
+  tracks: DashboardTrack[]
+  scenarios: { runs: number; avgContentScore: number | null; avgLanguageScore: number | null }
+  reports: ReportsSummary
+  cache: CacheStats
+  ai: ProviderStatus
+}

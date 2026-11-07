@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { ScenarioFeedbackView, ScenarioView } from '../../../shared/types'
 import { t } from '../i18n'
+import { ReportButton } from './ReportButton'
 import { TargetText } from './TargetText'
 
 function scoreLabel(value: number): string {
@@ -110,6 +111,10 @@ export function ScenarioFeedbackPanel({ run }: { run: ScenarioFeedbackView }): J
           <div className="mt-1 text-xs leading-relaxed text-ink">{run.followUpDrill}</div>
         </div>
       )}
+
+      <div className="mt-3">
+        <ReportButton kind="scenario" targetId={run.lessonId} text={run.feedback} compact />
+      </div>
 
       {run.source === 'fallback' && (
         <div className="mt-3 text-[11px] leading-relaxed text-faint">{t.scenario.localNotice}</div>

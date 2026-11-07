@@ -53,6 +53,16 @@ export const lessons = sqliteTable('lessons', {
   scenario: text('scenario'),
   position: integer('position').notNull().default(0),
   version: integer('version').notNull().default(1),
+  /**
+   * M5 (pré-geração): marcado quando o conteúdo nasceu da pré-geração, e não de
+   * uma abertura do aluno — é o que faz a lição abrir instantânea e offline.
+   */
+  prewarmedAt: integer('prewarmed_at'),
+  /**
+   * M5 (reportar conteúdo ruim): conteúdo marcado como ruim pelo aluno. A
+   * próxima abertura regenera em vez de reaproveitar o cache.
+   */
+  staleAt: integer('stale_at'),
   createdAt: integer('created_at').notNull()
 })
 
@@ -71,6 +81,8 @@ export const exercises = sqliteTable('exercises', {
   answerKey: text('answer_key').notNull(),
   source: text('source'),
   position: integer('position').notNull().default(0),
+  /** M5: reportado como conteúdo ruim pelo aluno — sai da prática, não some do banco. */
+  blocked: integer('blocked', { mode: 'boolean' }).notNull().default(false),
   createdAt: integer('created_at').notNull()
 })
 
@@ -100,7 +112,12 @@ export const errors = sqliteTable('errors', {
   source: text('source'),
   createdAt: integer('created_at').notNull(),
   lastSeenAt: integer('last_seen_at').notNull().default(0),
-  resolvedAt: integer('resolved_at')
+  resolvedAt: integer('resolved_at'),
+  /**
+   * M5: o aluno disse "essa correção foi injusta". O erro continua no caderno
+   * (histórico honesto), mas para de alimentar o foco de prompt das lições.
+   */
+  disputedAt: integer('disputed_at')
 })
 
 export const cards = sqliteTable(
@@ -215,6 +232,31 @@ export const scenarioRuns = sqliteTable('scenario_runs', {
   languageScore: real('language_score'),
   feedback: text('feedback'),
   createdAt: integer('created_at').notNull()
+})
+
+/**
+ * M5 — "reportar conteúdo ruim" (PLANO §11). É um registro do aluno sobre o
+ * conteúdo gerado, não um canal de suporte: fica no banco local, alimenta o
+ * painel de Progresso e tem efeito imediato (ver `core/reports.ts`).
+ */
+export const contentReports = sqliteTable('content_reports', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  profileId: integer('profile_id').notNull(),
+  /** 'exercise' | 'lesson_content' | 'correction' | 'scenario' | 'track_plan' | 'chat_reply'. */
+  kind: text('kind').notNull(),
+  targetId: integer('target_id'),
+  /** Motivo escolhido no botão de reportar (chave estável, não texto de UI). */
+  reason: text('reason').notNull(),
+  /** O que o app fez com o report: 'exercise-removed' | 'content-regenerates' | 'error-unfocused' | 'logged'. */
+  effect: text('effect').notNull().default('logged'),
+  note: text('note'),
+  /** Snapshot do conteúdo ruim (enunciado, correção questionada…), para reabrir depois. */
+  context: text('context'),
+  /** Rótulo do alvo no momento do report: título da lição, tag do erro. */
+  targetLabel: text('target_label'),
+  createdAt: integer('created_at').notNull(),
+  /** Report desfeito: o alvo volta a valer (exercicio desbloqueado, erro reativado). */
+  undoneAt: integer('undone_at')
 })
 
 export const settings = sqliteTable('settings', {

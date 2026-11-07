@@ -78,8 +78,32 @@ API). Sem sessão diária, streak ou meta obrigatória — você estuda quando q
 - [x] Degradação honesta: o gerador determinístico é o *fixture de inglês* do plano — sem IA e
       sem idioma-alvo inglês, o app avisa em vez de inventar conteúdo
 
-Próximo: M5 — produto (dashboard, pré-geração/cache, offline, reportar conteúdo ruim,
-empacotamento AppImage, script de eval por idioma).
+**M5 concluído** — produto:
+
+- [x] Painel de **Progresso**: tempo praticado (dias com prática, nunca streak), vocabulário com
+      retenção estimada pelo FSRS, caderno agregado, trilhas com rubrica separada e a fila de
+      conteúdo reportado
+- [x] **Pré-geração** em fila ociosa: gera a próxima lição provável antes de você pedi-la,
+      com IA disponível, uma chamada por vez, sem competir com o aluno e sem gastar token
+      no que já está em cache
+- [x] **Cache primeiro**: lição aquecida abre como leitura (sem IA, sem espera, offline);
+      sem IA o ciclo não regenera nada — ele espera
+- [x] **Comportamento offline**: sonda de disponibilidade do provedor com banner honesto
+      ("o que ainda funciona: cache, revisão e o banco de correções"), chip na sidebar e
+      eventos empurrados pelo main (sem polling)
+- [x] **Reportar conteúdo ruim** com efeito real: exercício sai da prática (e é reposto),
+      explicação é reescrita na próxima abertura, correção contestada sai do foco das
+      lições — tudo reversível, tudo registrado no banco local
+- [x] **Empacotamento** electron-builder → AppImage + .deb (`npm run dist`), com as
+      migrações do Drizzle via `extraResources` e o binding nativo fora do asar
+- [x] **Eval por idioma** (`scripts/eval.mjs --lang en|es|ja|ar`): ~20 tarefas golden por
+      idioma medindo JSON inválido, contrato, acurácia de correção, escrita (CJK/RTL) e
+      latência; `--offline` roda a linha de base determinística
+- [x] Lapidação do M4: texto gerado no processo main (recapitulação de fechamento,
+      rótulos de intervalo do FSRS, cards, motivo da sugestão, erros de geração) agora sai
+      no idioma das explicações do perfil — sem dicionário para o idioma, cai em inglês
+
+Próximo: v2 — voz (TTS + pronúncia), múltiplos perfis, export/import.
 
 ## Requisitos
 
@@ -112,6 +136,7 @@ npm run typecheck  # tsc nos projetos node e web
 npm test           # testes do domínio (bancos por par, FSRS, adaptação, i18n, integração do loop)
 npm run build      # build de produção em out/
 npm start          # roda o build de produção
+npm run dist       # AppImage + .deb em release/ (electron-builder)
 ```
 
 ### Avaliar a qualidade da IA
@@ -122,7 +147,19 @@ violado e latência por tarefa, contra um provedor real:
 ```bash
 node scripts/eval.mjs --ollama qwen3.5:0.8b
 GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash
+
+# por idioma (~20 tarefas golden cada): placement, currículo, lição, exercícios,
+# grade, tutor, trilha, cenário — mais os pares golden de correção do idioma
+node scripts/eval.mjs --ollama gemma4:12b --lang es
+node scripts/eval.mjs --ollama gemma4:12b --lang ja   # escrita CJK
+node scripts/eval.mjs --ollama gemma4:12b --lang ar   # escrita RTL
+node scripts/eval.mjs --offline                       # linha de base sem IA (npm test)
+node scripts/eval.mjs --ollama gemma4:12b --n 5       # só as 5 primeiras tarefas
 ```
+
+Além de JSON inválido, contrato e latência, o harness mede **acurácia de correção**
+(pegou a tag esperada? a forma esperada?) e **escrita** (o texto do idioma-alvo veio em
+kana/hanzi no japonês, em árabe no árabe).
 
 Com modelo local pequeno é esperado ver contratos falharem — é exatamente o caso em que
 o app degrada para o gerador determinístico (inglês) e o banco de interferência do par continua
@@ -134,7 +171,51 @@ Há também smoke tests que só rodam quando você pede, com um modelo de pé �
 ```bash
 LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m3.smoke.test.ts
 LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m4.smoke.test.ts
+
+# M5: aquecimento real, cache primeiro e os efeitos de reportar conteúdo ruim
+LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m5.smoke.test.ts
 ```
+
+## Empacotamento (Linux)
+
+```bash
+npm run dist            # AppImage + .deb em release/
+npm run dist:appimage   # só o AppImage
+npm run dist:deb        # só o .deb
+npm run dist:dir        # unpacked (release/linux-unpacked) para conferir rápido
+```
+
+O AppImage é autocontido: `chmod +x release/language-teacher-0.1.0.AppImage && ./release/…`.
+O `.deb` declara as dependências de GTK/NSS que o Electron precisa. Config em
+`electron-builder.yml`; o ícone nasce de `build/icon.svg` — rode `npm run icons` se você
+mudar o SVG (gera `build/icon.png` e `build/icons/*x*.png` com `rsvg-convert`).
+
+O filtro `files` do `electron-builder.yml` é **ancorado na raiz** de propósito: um
+`!**/dist/**` (com `**/`) tira o `dist/` de cada dependência — que é onde o código delas
+mora — e o AppImage abre morrendo em `Cannot find module .../ts-fsrs/dist/index.cjs`.
+`npm run dist:dir` + abrir o `release/linux-unpacked` é o jeito rápido de pegar isso.
+
+Dois detalhes que não são cosméticos (e quebram o app se sumirem):
+
+- as **migrações** viajam como `extraResources` — empacotado, o processo main lê
+  `process.resourcesPath/drizzle`, não o repositório;
+- **better-sqlite3** sai do asar (`asarUnpack`) porque o binding nativo precisa existir
+  como arquivo no disco; `npmRebuild: false` basta, já que o pacote traz prebuild N-API.
+
+Windows/macOS: a config cobre Linux; os alvos `nsis`/`dmg` ainda não foram validados.
+
+## O que o app guarda sobre você (M5)
+
+O painel de **Progresso** é o modelo do aluno em tela: dias com prática (não streak),
+minutos por tipo de prática, vocabulário com a curva de retenção do FSRS, tags do caderno,
+progresso por trilha e as duas notas do roleplay separadas. Os mecanismos por trás:
+
+| Recurso | O que faz de fato |
+|---|---|
+| Pré-geração | fila ociosa (12 s sem pedir nada) aquece no máximo 2 itens por ciclo, só com IA `ok`, nunca durante uma geração sua |
+| Cache | lição com conteúdo salvo abre sem tocar no provedor; `lessons.prewarmed_at` diz o que veio da fila |
+| Offline | sonda o provedor (TTL 20 s), empurra `provider:event` para a UI e diz o que continua funcionando |
+| Reportar ruim | `exercise` → fora da prática e reposto; `lesson_content` → reescreve na próxima abertura; `correction` → sai do foco de prompt; os demais entram na fila do painel. Todos reversíveis |
 
 ## Ollama (local)
 
@@ -195,6 +276,11 @@ src/
     notebook.ts    caderno de erros (recorrência por tag, resolver, foco para prompts)
     review.ts      fila SRS: card por template, revisão FSRS, contadores
     guided.ts      sessão guiada de 5 etapas (estado persistido em study_sessions)
+    dashboard.ts   painel de Progresso (agrega tempo, vocabulário, erros, trilhas, reports)
+    reports.ts     "reportar conteúdo ruim": efeito real + registro reversível
+    prewarm.ts     fila ociosa de pré-geração + estatísticas de cache
+    provider-status.ts sonda de disponibilidade da IA (banner offline)
+    events.ts      barramento interno (learning → prewarm) sem ciclo de imports
     tracks.ts      trilhas de foco: esboço → revisão → aprovação → lições da trilha
     scenario.ts    modo cenário: persona do roleplay e rubrica de tarefa × língua
     locale.ts      par de idiomas do perfil → regras do banco, prompts e tokenização
@@ -215,15 +301,22 @@ src/
     grading.ts        correção local dos tipos objetivos (normalização multilíngue)
     fallback.ts       gerador determinístico de currículo, lição e exercícios (fixture de inglês)
     tracks.ts         trilha determinística, cadência de cenário e mix de recomendação
+    dashboard.ts      aritmética pura do painel (dias com prática, janelas, retenção)
+    reports.ts        taxonomia e efeitos dos reports de conteúdo ruim
+    runtime-text.ts   texto de runtime do main no idioma do aluno (cards, intervalos, recap)
   preload/         bridge segura para o renderer
   renderer/        React + Tailwind (UI PT-BR / EN via `i18n/`)
     i18n/          dicionários pt-BR.ts e en.ts + registro com troca em runtime (teste de paridade)
     lang.ts        idioma-alvo em runtime: rótulos {lang}/{native}/{pair} e dir/lang
-    screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Sessão guiada, Configurações
-    components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, Sidebar, TargetText
+    screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Progresso, Sessão guiada, Configurações
+    components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, ReportButton,
+                   AiStatus, Sidebar, TargetText
+    lib/           format.ts (tamanho de banco, decimal regional)
   shared/          tipos compartilhados entre main e renderer
+                   report-reasons.ts (taxonomia de report: menu do renderer = efeito do main)
 test/              stub do Electron para os testes de integração do processo main
-scripts/eval.mjs   harness manual de qualidade de IA
+scripts/eval.mjs   harness manual de qualidade de IA, por idioma
+electron-builder.yml  empacotamento AppImage/.deb; build/icon.svg → ícones
 ```
 
 ## Como o loop funciona (M2)
@@ -328,7 +421,8 @@ tarefa             existir; senão [] → 100% IA    Intl.Segmenter (CJK) em ord
 - **Regras do jogo offline**: o gerador determinístico e o banco de domínios das trilhas são o
   *fixture de inglês* do plano. Sem IA, outro idioma-alvo recebe um erro claro — nunca frases
   inventadas em inglês.
-- Limitações conhecidas: alguns textos gerados no processo main (recapitulação de fechamento,
-  rótulos de intervalo do FSRS) ainda saem em PT-BR — são conteúdo do modelo do aluno, não
-  strings de interface.
+- Limitações conhecidas: os textos gerados no processo main saem no idioma das explicações do
+  perfil (`core/runtime-text.ts`: PT-BR, EN, ES, FR; demais idiomas caem em inglês). Cards já
+  gravados antes desta mudança continuam com o texto com que nasceram — são histórico, não
+  string de interface.
 

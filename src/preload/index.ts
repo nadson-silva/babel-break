@@ -1,10 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   AppSettings,
+  CacheStats,
   ChatEvent,
   ConversationSummary,
   ConversationView,
   CurriculumView,
+  DashboardView,
   FocusTrackView,
   GradeFeedback,
   GuidedSession,
@@ -20,7 +22,14 @@ import type {
   PlacementTest,
   ProfileState,
   ProviderId,
+  PrewarmCycleOutcome,
+  PrewarmState,
+  ProviderStatus,
   RecapView,
+  ReportInput,
+  ReportKind,
+  ReportItemView,
+  ReportsSummary,
   ReviewRating,
   ReviewResult,
   ReviewState,
@@ -52,7 +61,17 @@ const api = {
     list: (provider: ProviderId): Promise<ModelInfo[]> => ipcRenderer.invoke('models:list', provider)
   },
   provider: {
-    test: (provider: ProviderId): Promise<TestResult> => ipcRenderer.invoke('provider:test', provider)
+    test: (provider: ProviderId): Promise<TestResult> => ipcRenderer.invoke('provider:test', provider),
+    /** M5: último estado da sonda (com TTL) — não dispara rede se estiver fresco. */
+    status: (): Promise<ProviderStatus> => ipcRenderer.invoke('provider:status'),
+    /** Sonda forçada, para o botão "testar conexão". */
+    probe: (): Promise<ProviderStatus> => ipcRenderer.invoke('provider:probe'),
+    /** Mudanças de disponibilidade da IA chegam por aqui (banner offline). */
+    onStatus: (callback: (status: ProviderStatus) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, status: ProviderStatus): void => callback(status)
+      ipcRenderer.on('provider:event', listener)
+      return () => ipcRenderer.removeListener('provider:event', listener)
+    }
   },
   /** Eventos do turno do tutor (streaming + correções inline). */
   tutor: {
@@ -154,6 +173,26 @@ const api = {
       ipcRenderer.invoke('scenario:session', conversationId),
     runs: (limit?: number): Promise<ScenarioRunView[]> => ipcRenderer.invoke('scenario:runs', limit),
     refresh: (lessonId: number): Promise<ScenarioView> => ipcRenderer.invoke('scenario:refresh', lessonId)
+  },
+  /** M5: painel de Progresso — tempo, vocabulário, erros, trilhas, cache e reports. */
+  dashboard: {
+    get: (): Promise<DashboardView> => ipcRenderer.invoke('dashboard:get')
+  },
+  /** M5: "reportar conteúdo ruim" — cada tipo tem efeito real (ver core/reports.ts). */
+  report: {
+    submit: (input: ReportInput): Promise<ReportItemView> => ipcRenderer.invoke('report:submit', input),
+    undo: (reportId: number): Promise<ReportItemView | null> => ipcRenderer.invoke('report:undo', reportId),
+    /** Desfaz o report mais recente sobre um alvo (ex.: reativar uma correção). */
+    undoTarget: (kind: ReportKind, targetId: number): Promise<ReportItemView | null> =>
+      ipcRenderer.invoke('report:undo-target', kind, targetId),
+    list: (limit?: number): Promise<ReportsSummary> => ipcRenderer.invoke('report:list', limit)
+  },
+  /** M5: pré-geração e cache de conteúdo. */
+  cache: {
+    state: (): Promise<PrewarmState> => ipcRenderer.invoke('pregen:state'),
+    /** Aquece agora (botão das Configurações). */
+    warm: (): Promise<PrewarmCycleOutcome> => ipcRenderer.invoke('pregen:run'),
+    stats: (): Promise<CacheStats> => ipcRenderer.invoke('cache:stats')
   }
 }
 
