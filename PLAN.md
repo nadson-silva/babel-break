@@ -1,8 +1,9 @@
 # Language Teacher — Plano de Produto e Arquitetura
 
-> **North star:** um tutor de idiomas desktop, local-first, que **lembra do que você errou**.
-> Não é "chat com uma LLM" — o valor durável é o **modelo do aluno** (caderno de erros +
-> memória de vocabulário + estimativa de proficiência) que toda chamada de IA lê e atualiza.
+> **North star:** um tutor de idiomas desktop, local-first, que **lembra do que você errou** e
+> **respeita o seu ritmo**. Não é "chat com uma LLM" — o valor durável é o **modelo do aluno**
+> (caderno de erros + memória de vocabulário + estimativa de proficiência) que toda chamada de IA
+> lê e atualiza, não importa com que frequência o usuário apareça.
 
 ## Decisões travadas
 
@@ -12,7 +13,8 @@
 | Idioma-alvo (v1) | **Inglês** |
 | Idioma nativo / explicações | **Português (PT-BR)** |
 | Idioma da interface | **Português (PT-BR)** |
-| Experiência central | **Híbrida**: lições estruturadas + tutor de IA |
+| Experiência central | **Híbrida**: aulas estruturadas + conversas com tutor de IA |
+| Frequência | **Livre, sob demanda** — sem sessão diária, streak ou meta obrigatória |
 | Idiomas suportados | Qualquer idioma (conteúdo gerado por IA), com inglês como fixture de qualidade |
 | Provedores de IA | **Ollama** (local) ou **Gemini** (nuvem) — usuário escolhe |
 | Escopo v1 | MVP funcional, usuário único, sem contas/billing |
@@ -20,30 +22,43 @@
 
 ---
 
-## 1. O loop de aprendizagem
+## 1. Aulas e conversas, no ritmo do usuário
 
-Uma sessão diária de 15–20 min, composta pelo app:
+O app não impõe sessão diária, streak, meta ou "plano de hoje". O usuário estuda quando e
+quanto quiser; a frequência é dele. O app oferece três entradas, e nenhuma é obrigatória:
 
 ```
-Onboarding → teste de nivelamento (CEFR)
+Onboarding → teste de nivelamento (CEFR, opcional)
         ↓
-Sessão diária:
-  1. Revisão    cards SRS vencidos (erros passados + vocabulário)
+Home: "O que você quer fazer?"
+  • Aula          lição estruturada do currículo base ou de uma trilha de foco
+  • Conversa      chat livre ou roleplay com tema escolhido na hora
+  • Sessão guiada opcional (15–20 min), só se o usuário pedir
+```
+
+Sessão guiada, quando solicitada:
+
+```
+  1. Revisão    cards SRS vencidos (o usuário pode pular)
   2. Lição      um conceito, explicado em PT-BR, 2–3 exemplos em inglês
   3. Prática    5–8 exercícios (traduzir, cloze, ordenar, múltipla escolha, produção livre)
   4. Tutor      roleplay usando a gramática + vocabulário da lição
-  5. Fechamento recapitulação de correções → novos cards + novas tags de erro → plano do dia seguinte
+  5. Fechamento recapitulação de correções → novos cards + novas tags de erro
 ```
 
-Cada etapa escreve no mesmo store: tentativas, tags de erro, estado SRS.
-É isso que faz a sessão #10 diferente da #1.
+**Recomendação, não obrigação.** A home mostra "continuar de onde parei" e um "próximo passo
+sugerido" (baseado em nível, erros e SRS), mas o usuário pode abrir qualquer lição ou conversa
+a qualquer momento. Lição pode ser fechada no meio; o estado fica salvo.
+
+Cada interação escreve no mesmo store: tentativas, tags de erro, estado SRS.
+É isso que faz a aula #10 diferente da #1, mesmo que entre elas passem três semanas.
 
 ## 2. O que impede de ser só um chatbot
 
 | Mecanismo | Por que importa |
 |---|---|
 | **Caderno de erros** | Correções são tagueadas (`past-tense`, `gender-agreement`, `register`) e injetadas nos prompts futuros; erros recorrentes geram exercícios direcionados. |
-| **Agendamento FSRS** | Usar `ts-fsrs` (algoritmo open-source moderno, melhor retenção que SM-2). Cards gerados automaticamente de vocabulário + erros. |
+| **Agendamento FSRS (pull)** | Usar `ts-fsrs` (algoritmo open-source moderno, melhor retenção que SM-2). Cards gerados de vocabulário + erros. Vencidos acumulam em silêncio e são oferecidos quando o usuário abre uma aula/conversa ou pede "revisar" — nunca como cobrança. |
 | **Estimativas por habilidade** | Estimativa estilo Elo por habilidade (reading/writing/listening/speaking/vocab/grammar), atualizada pelas tentativas, usada para escolher nível e restringir a geração. |
 | **Cache de conteúdo** | Lições/exercícios gerados uma vez e salvos em SQLite — o app funciona offline depois e não gasta tokens regerando. |
 | **Política de correção** | Configuração do usuário: recast suave / correção explícita / ambos. No nível do prompt, não da UI. |
@@ -66,7 +81,7 @@ interface LLMProvider {
 | Tarefa | Saída | Observações |
 |---|---|---|
 | `placement` | 8–12 itens adaptativos + pontuação | uma vez por perfil |
-| `curriculum_plan` | esboço unidade → lição (JSON) | gerado **antes** das lições; lições ficam restritas a ele |
+| `curriculum_plan` | esboço unidade → lição (JSON) | gerado **antes** das lições; lições ficam restritas a ele; suporta geração incremental sob demanda |
 | `lesson_content` | explicação, exemplos, pontos gramaticais, vocabulário (JSON) | explicação em PT-BR, exemplos em inglês |
 | `exercise_gen` | exercícios tipados com gabarito (JSON) | alimentado pela lição + principais erros |
 | `grade_answer` | correto?, score, tags de erro, correção, explicação | rubrica + few-shots; corrigir texto livre é a parte ruidosa |
@@ -92,11 +107,12 @@ que compartilha o mesmo SRS e caderno de erros.
 
 ### Duas camadas de conteúdo, um loop
 
-- **Currículo base** — progressão geral de inglês A1→C1. Nunca é pulado; garante fundamentos.
+- **Currículo base** — progressão geral de inglês A1→C1. É a espinha dorsal recomendada; garante fundamentos.
 - **Trilha de foco** — vocabulário de domínio + cenários (ex.: *"Entrevista para dev"*), gerada no nível atual do aluno.
 
 O nível continua governando a complexidade gramatical. A trilha muda **domínio de vocabulário e situações,
-não a sequência gramatical** — é isso que impede um usuário de pular para linguagem de entrevista C1 estando em A2.
+não a sequência gramatical** — é isso que impede que uma trilha de entrevista entregue linguagem C1 para
+alguém em A2, mesmo que o usuário pule direto para ela. Pré-requisitos são **avisos**, não bloqueios.
 
 ### Criação
 
@@ -105,14 +121,18 @@ não a sequência gramatical** — é isso que impede um usuário de pular para 
 3. Usuário **revisa/aprova o esboço** antes de comprometer — mantém o currículo coerente e barato de regerar.
 4. Trilha pode ser trocada/adicionada a qualquer momento; progresso preservado por trilha.
 
-### Compositor de sessão
+### Montagem da sessão guiada (opcional)
 
 ```
+quando o usuário pede "sessão guiada":
 cards SRS vencidos (todas as trilhas)
 → 70% lição base / 30% lição de foco (profile.focus_mix, ajustável)
 → a cada 3ª lição de foco = cenário de roleplay
-→ checkpoint semanal = feedback de cenário + reestimativa de nível
+→ ao final = feedback de cenário + reestimativa de nível
 ```
+
+Fora da sessão guiada, `focus_mix` influencia apenas a **ordem das recomendações**
+("próximo passo sugerido"), não uma cota diária. O usuário que só quer conversar não recebe lição.
 
 Mais um caminho de **lição-relâmpago**: *"tenho entrevista amanhã"* → um cenário direcionado + lista de vocabulário, sem precisar de trilha.
 
@@ -163,7 +183,12 @@ attempts        id, exercise_id, response, correct, score, latency_ms
 errors          id, profile_id, category, tag, original, corrected, context, resolved_at
 cards           id, profile_id, content JSON, stability, difficulty, due, reps, lapses, state
 reviews         id, card_id, rating, reviewed_at
-sessions        id, profile_id, date, plan JSON, summary
+lesson_progress profile_id, lesson_id, status /* not_started|in_progress|completed */,
+                last_opened_at, score
+study_sessions  id, profile_id, kind /* lesson|conversation|guided|review */,
+                started_at, ended_at, summary JSON
+conversations   id, profile_id, lesson_id NULL, mode /* free|scenario */,
+                topic, scenario JSON, summary
 messages        id, conversation_id, role, content, created_at
 focus_tracks    id, profile_id, title, goal_tag, level_range,
                 status /* draft|active|archived */, source /* user|suggested */
@@ -186,9 +211,12 @@ Essas tags alimentam `exercise_gen`, `tutor_turn` (prioridade de recast) e o har
 
 ## 9. Telas
 
-Onboarding (idiomas, objetivo, trilha, nível) → Nivelamento → Hoje (card de sessão) →
-Player de lição → Chat com tutor (modo cenário) → Revisão (SRS) → Progresso (erros, vocabulário, streak, trilhas) →
-Configurações (provedor, modelo por papel, estilo de correção, mix de foco).
+Onboarding (idiomas, objetivo, trilha, nível) → Nivelamento →
+**Home** ("O que você quer fazer?" — Aula / Conversa / Sessão guiada; continuar de onde parei; próximo passo sugerido) →
+Catálogo de lições e trilhas (navegável, sem bloqueio de pré-requisito) →
+Player de lição → Chat com tutor (livre ou modo cenário) → Revisão (SRS, sob demanda) →
+Progresso (erros, vocabulário, tempo praticado, trilhas — **sem streak**) →
+Configurações (provedor, modelo por papel, estilo de correção, mix de foco, lembretes opcionais).
 
 ## 10. Milestones
 
@@ -196,9 +224,9 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco).
 |---|---|---|
 | **M0 — shell** (1–2 d) | scaffold electron-vite, SQLite + migrações, configurações com provedor + chave + teste de conectividade, chat de teste em streaming | dá para conversar com Gemini **e** Ollama pelo app |
 | **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim |
-| **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS, compositor de sessão | a sessão #2 visivelmente se adapta à #1 |
-| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix no compositor, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica |
-| **M4 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável diariamente |
+| **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência |
+| **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica |
+| **M4 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo |
 | **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — |
 
 A base vem antes das trilhas de propósito: trilhas reutilizam a mesma máquina de lição/exercício/SRS;
@@ -208,15 +236,20 @@ construí-las primeiro significaria construir tudo duas vezes.
 
 - **Currículo incoerente** entre lições → sempre gerar o esboço da unidade primeiro, depois restringir as lições a ele; versionar prompts.
 - **Correção ruidosa de texto livre** → rubrica + botão "essa correção foi injusta" que recalibra.
-- **Rate limits (free tier Gemini)** → pré-gerar plano de 7 dias, enfileirar requisições, cachear agressivamente.
+- **Rate limits (free tier Gemini)** → pré-gerar o próximo conteúdo provável do usuário, enfileirar requisições, cachear agressivamente.
 - **Modelos locais fracos** → tarefas pequenas com schema, retentativa, degradação graciosa.
 - **Roleplay subjetivo** → rubrica de conteúdo por checklist + score de língua separado.
+- **Frequência livre pode reduzir retenção** → recomendação não coercitiva ("continuar de onde parei", próximo passo sugerido), progresso visível, lembrete opt-in. Nunca streak quebrado, culpa ou meta expirada.
 - **Harness de eval** a partir do M2: ~20 tarefas golden por idioma, medindo taxa de JSON inválido, latência e acurácia de correção. `scripts/eval.ts` manual, não CI.
 
 ## 12. Fora de escopo na v1
 
-Voz/pronúncia, contas/sync, mobile, imagens, multiplayer, monetização, RAG sobre documentos.
+Voz/pronúncia, contas/sync, mobile, imagens, multiplayer, monetização, RAG sobre documentos,
+gamificação punitiva (streak, ranking, metas expiradas).
 
 ## 13. Ajustes padrão (a menos que o usuário mude)
 
-- `focus_mix = 0.3` (30% das sessões no tópico pedido).
+- `focus_mix = 0.3` (30% do conteúdo **recomendado** vem do tópico pedido).
+- **Nenhuma meta diária, streak ou sessão obrigatória.** Sessão guiada só quando o usuário pede.
+- **Lembretes desligados por padrão.** Se ativados, o usuário escolhe dias e horário; são um convite, não uma cobrança.
+- SRS acumula vencidos sem penalidade e é oferecido no início de aulas/conversas, sempre pulável.
