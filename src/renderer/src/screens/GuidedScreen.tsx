@@ -174,7 +174,7 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
       <div className="flex-1 overflow-y-auto px-8 py-2">
         <div className="mx-auto max-w-3xl space-y-5 pb-8">
           {error && (
-            <div className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
+            <div role="alert" className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
               {error}
             </div>
           )}

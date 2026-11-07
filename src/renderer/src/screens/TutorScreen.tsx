@@ -126,7 +126,9 @@ export function TutorScreen({
 
   return (
     <div className="flex h-full min-w-0">
-      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-panel lg:flex">
+      {/* M6 (E5): o breakpoint era `lg` (1024px) e a janela mínima é 940 — entre
+          940 e 1023 o app ficava sem lista de conversas nenhuma. */}
+      <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-panel md:flex">
         <div className="border-b border-line-soft p-4">
           <div className="text-[10px] uppercase tracking-wider text-faint">{t.tutor.conversations}</div>
           <div className="mt-2 space-y-2">
@@ -142,6 +144,7 @@ export function TutorScreen({
             <button
               type="button"
               onClick={() => setScenarioMode((current) => !current)}
+              aria-pressed={scenarioMode}
               className={`w-full rounded-lg border px-3 py-1.5 text-[11px] transition-colors ${
                 scenarioMode
                   ? 'border-accent/50 bg-accent-soft text-accent'

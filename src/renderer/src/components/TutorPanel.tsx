@@ -68,6 +68,16 @@ export function TutorPanel({
   const [closing, setClosing] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  // M6 (E4): "seguir o rabo" só quando o aluno já está no fim da lista. Antes,
+  // o scrollIntoView por token impedia ler o que acabou de passar.
+  const stickToBottom = useRef(true)
+
+  function trackScroll(): void {
+    const el = scrollRef.current
+    if (!el) return
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }
 
   const busy = streaming !== null
 
@@ -107,22 +117,32 @@ export function TutorPanel({
 
   useEffect(() => {
     return window.api.tutor.onEvent((event: ChatEvent) => {
+      // M6 (E4): o canal `chat:event` é global — evento de outra conversa não
+      // entra nesta tela nem quando o aluno troca de conversa no meio do turno.
+      if (event.conversationId != null && event.conversationId !== conversationId) {
+        return
+      }
+
       if (event.type === 'status') {
         setStatus(event.message ?? null)
         return
       }
 
       if (event.type === 'corrections') {
-        // anexa as correções à última mensagem do aluno antes da resposta
+        // M6 (E4): o evento carimba o `requestId` do turno — as correções vão
+        // para o usuário que o gerou, não para "qualquer última".
         setMessages((previous) => {
-          const lastUser = [...previous].reverse().findIndex((message) => message.role === 'user')
-          if (lastUser === -1) return previous
-          const index = previous.length - 1 - lastUser
-          return previous.map((message, position) =>
-            position === index
-              ? { ...message, corrections: event.corrections ?? [], recast: event.recast }
-              : message
-          )
+          const turnIndex = previous.findIndex((message) => message.id === event.requestId)
+          if (turnIndex === -1) return previous
+          for (let index = turnIndex - 1; index >= 0; index -= 1) {
+            if (previous[index].role !== 'user') continue
+            return previous.map((message, position) =>
+              position === index
+                ? { ...message, corrections: event.corrections ?? [], recast: event.recast }
+                : message
+            )
+          }
+          return previous
         })
         return
       }
@@ -154,9 +174,13 @@ export function TutorPanel({
         setStreaming((current) => (current === event.requestId ? null : current))
       }
     })
-  }, [])
+    // M6 (E4): dependente da conversa — o filtro de eventos lê o id atual,
+    // não o da primeira montagem (o TutorScreen remonta o painel por key, mas
+    // o listener não pode depender disso em silêncio).
+  }, [conversationId])
 
   useEffect(() => {
+    if (!stickToBottom.current) return
     bottomRef.current?.scrollIntoView({ block: 'end' })
   }, [messages])
 
@@ -167,6 +191,7 @@ export function TutorPanel({
     const requestId = newId()
     setLoadError(null)
     setInput('')
+    stickToBottom.current = true
     setMessages((previous) => [
       ...previous,
       { id: newId(), role: 'user', content: text },
@@ -255,6 +280,9 @@ export function TutorPanel({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>): void {
+    // M6 (E2): Enter durante composição (IME de ja/zh/ko) confirma o candidato,
+    // não envia a mensagem.
+    if (event.nativeEvent.isComposing) return
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       void send(input)
@@ -269,7 +297,11 @@ export function TutorPanel({
         </div>
       )}
 
-      <div className={`flex-1 overflow-y-auto px-6 ${variant === 'full' ? 'py-6' : 'py-4'}`}>
+      <div
+        ref={scrollRef}
+        onScroll={trackScroll}
+        className={`flex-1 overflow-y-auto px-6 ${variant === 'full' ? 'py-6' : 'py-4'}`}
+      >
         {scenario && (
           <div className="mx-auto mb-4 max-w-3xl">
             <ScenarioBanner scenario={scenario} />

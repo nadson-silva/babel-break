@@ -696,7 +696,7 @@ export function detectInterference(text: string, rules: InterferenceRule[] = INT
 
   for (const rule of rules) {
     const re = globalize(rule)
-    let match: RegExpExecArray | null = null
+    let match: RegExpExecArray | null
     while ((match = re.exec(text)) !== null) {
       // M6 (B4): ocorrências em contexto protegido pela guarda não contam;
       // segue para a próxima até achar uma que passa (ou esgota a regex).

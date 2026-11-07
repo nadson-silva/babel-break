@@ -78,18 +78,23 @@ function NavButton({
   onClick,
   icon,
   label,
-  badge
+  badge,
+  target
 }: {
   active: boolean
   onClick: () => void
   icon: JSX.Element
   label: string
   badge?: number
+  /** Roteiro do botão — vira aria-current quando ativo (M6/E3). */
+  target: View
 }): JSX.Element {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-view={target}
+      aria-current={active ? 'page' : undefined}
       className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors ${
         active ? 'bg-panel-2 text-ink' : 'text-muted hover:bg-panel-2/60 hover:text-ink'
       }`}
@@ -97,7 +102,10 @@ function NavButton({
       <span className={active ? 'text-accent' : 'text-faint'}>{icon}</span>
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {badge ? (
-        <span className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent">
+        <span
+          aria-live="polite"
+          className="shrink-0 rounded-full bg-accent-soft px-1.5 py-0.5 text-[10px] font-semibold text-accent"
+        >
           {badge}
         </span>
       ) : null}
@@ -180,30 +188,35 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = n
       <nav className="space-y-1 px-3">
         <NavButton
           active={view === 'home'}
+          target="home"
           onClick={() => onNavigate('home')}
           icon={<HomeIcon />}
           label={t.nav.home}
         />
         <NavButton
           active={view === 'lessons'}
+          target="lessons"
           onClick={() => onNavigate('lessons')}
           icon={<LessonsIcon />}
           label={t.nav.lessons}
         />
         <NavButton
           active={view === 'tracks'}
+          target="tracks"
           onClick={() => onNavigate('tracks')}
           icon={<TrackIcon />}
           label={t.nav.tracks}
         />
         <NavButton
           active={view === 'tutor'}
+          target="tutor"
           onClick={() => onNavigate('tutor')}
           icon={<ChatIcon />}
           label={t.nav.tutor}
         />
         <NavButton
           active={view === 'review'}
+          target="review"
           onClick={() => onNavigate('review')}
           icon={<ReviewIcon />}
           label={t.nav.review}
@@ -211,18 +224,21 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = n
         />
         <NavButton
           active={view === 'notebook'}
+          target="notebook"
           onClick={() => onNavigate('notebook')}
           icon={<NotebookIcon />}
           label={t.nav.notebook}
         />
         <NavButton
           active={view === 'progress'}
+          target="progress"
           onClick={() => onNavigate('progress')}
           icon={<ProgressIcon />}
           label={t.nav.progress}
         />
         <NavButton
           active={view === 'settings'}
+          target="settings"
           onClick={() => onNavigate('settings')}
           icon={<SettingsIcon />}
           label={t.nav.settings}

@@ -136,7 +136,7 @@ export function OnboardingScreen({ settings, languages, onDone }: OnboardingScre
 
         <div className="mt-8 flex-1">
           {error && (
-            <div className="mb-5 rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
+            <div role="alert" className="mb-5 rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
               <div className="font-medium">{t.onboarding.errorTitle}</div>
               <div className="mt-1 leading-relaxed">{error}</div>
               <button

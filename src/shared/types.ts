@@ -70,6 +70,12 @@ export interface ChatMessage {
 
 export interface ChatEvent {
   requestId: string
+  /**
+   * M6 (E4): a conversa dona do evento. O canal `chat:event` é global — sem
+   * isto, trocar de conversa no meio de um turno despejava correção/token no
+   * chat errado.
+   */
+  conversationId?: number
   type: 'token' | 'done' | 'error' | 'cancelled' | 'corrections' | 'status'
   token?: string
   text?: string

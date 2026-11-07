@@ -198,7 +198,7 @@ export function ProgressScreen({ onOpenSettings }: ProgressScreenProps): JSX.Ele
       <div className="flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto max-w-4xl space-y-5">
           {error && (
-            <div className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">{error}</div>
+            <div role="alert" className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">{error}</div>
           )}
 
           {!view ? (

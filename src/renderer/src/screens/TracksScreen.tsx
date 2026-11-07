@@ -384,7 +384,7 @@ export function TracksScreen({
       <div className="flex-1 overflow-y-auto px-8 py-6">
         <div className="mx-auto max-w-3xl space-y-4 pb-8">
           {error && (
-            <div className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
+            <div role="alert" className="rounded-xl border border-danger/40 bg-danger-soft px-4 py-3 text-xs text-danger">
               <div className="font-medium">{t.tracks.errorTitle}</div>
               <div className="mt-1 leading-relaxed">{error}</div>
             </div>
@@ -412,6 +412,8 @@ export function TracksScreen({
                 value={objective}
                 onChange={(event) => setObjective(event.target.value)}
                 onKeyDown={(event) => {
+                  // M6 (E2): Enter em composição de IME não dispara a criação.
+                  if (event.nativeEvent.isComposing) return
                   if (event.key === 'Enter') void create()
                 }}
                 placeholder={t.tracks.createPlaceholder}

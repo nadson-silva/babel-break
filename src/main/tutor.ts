@@ -461,7 +461,9 @@ export async function sendTurn(
 
   const controller = new AbortController()
   activeRequests.set(input.requestId, controller)
-  const send = (event: ChatEvent): void => emit(event)
+  // M6 (E4): todo evento do turno nasce carimbado com a conversa — o canal é
+  // global e a troca de conversa no meio do turno não pode despejar eventos aqui.
+  const send = (event: ChatEvent): void => emit({ ...event, conversationId: input.conversationId })
 
   try {
     const profile = profileOf(profileId)
