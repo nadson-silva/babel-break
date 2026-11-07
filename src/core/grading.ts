@@ -6,14 +6,28 @@ export interface ExerciseAnswerKey {
   explanation?: string
 }
 
+/**
+ * Normalização para comparação determinística de respostas.
+ *
+ * M4: antes qualquer coisa fora de [a-z0-9] virava espaço — o que apagava
+ * por completo chinês, japonês, coreano e árabe (e igualava respostas que não
+ * deveriam se igualar). Agora preserva `\p{L}`/`\p{N}` de qualquer escrita,
+ * mantém a tolerância a acentos latinos (NFD + stripping), remove diacríticos
+ * combinantes (harakat árabe etc.), marcas bidi/zero-width e pontuação.
+ */
 export function normalizeText(text: string): string {
   return text
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
+    // Remove apenas diacríticos *não portadores de sentido*: acentos latinos e
+    // harakat/niqqud. O dakuten do japonês (で = と+◌゙) é sentido — NFD+strip
+    // geral de \p{M} transformaria 'です' em 'てす'. NFC no fim remontas Hangul.
+    .replace(/[\u0300-\u036f\u0591-\u05AF\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED\u08D3-\u08FF]/g, '')
+    .normalize('NFC')
+    .replace(/[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u061C\u070F]/g, '')
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
     .toLowerCase()
-    .replace(/[^a-z0-9'\s]/g, ' ')
+    .replace(/[^\p{L}\p{N}'\s]/gu, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }

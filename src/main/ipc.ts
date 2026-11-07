@@ -1,5 +1,6 @@
 import { app, ipcMain } from 'electron'
-import type { AppSettings, ProviderId, SettingsPayload, TestResult } from '../shared/types'
+import type { AppSettings, LanguageOption, ProviderId, SettingsPayload, TestResult } from '../shared/types'
+import { LANGUAGES } from '../core/languages'
 import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
@@ -37,6 +38,19 @@ export function registerIpcHandlers(): void {
     version: app.getVersion(),
     name: app.getName()
   }))
+
+  // M4: o renderer não importa `core/` (são dois projetos TS) — o registro de
+  // idiomas cruza a ponte como dado de exibição para os seletores de idioma.
+  ipcMain.handle('languages:list', (): LanguageOption[] =>
+    LANGUAGES.map(({ code, name, nativeName, promptName, scriptDirection, tokenization }) => ({
+      code,
+      name,
+      nativeName,
+      promptName,
+      scriptDirection,
+      tokenization
+    }))
+  )
 
   ipcMain.handle('settings:get', () => settingsPayload())
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEFAULT_LOCALE,
   exercisePrompt,
   lessonContentPrompt,
   scenarioFeedbackPrompt,
@@ -249,7 +250,7 @@ describe('rubrica do cenário sem IA', () => {
 
 describe('prompts das trilhas e do cenário', () => {
   it('o esboço da trilha pede domínio novo e gramática do nível do aluno', () => {
-    const prompt = trackPlanPrompt({ objective: 'entrevista para dev', level: 'A2', goal: 'conversação' })
+    const prompt = trackPlanPrompt({ objective: 'entrevista para dev', level: 'A2', goal: 'conversação', locale: DEFAULT_LOCALE })
 
     expect(prompt.user).toContain('A2')
     expect(prompt.user).toContain('entrevista para dev')
@@ -266,7 +267,8 @@ describe('prompts das trilhas e do cenário', () => {
       level: 'A2',
       goal: 'entrevista para dev',
       errors: [],
-      track: { title: 'Entrevista para dev', vocabulary: ['background', 'stack'] }
+      track: { title: 'Entrevista para dev', vocabulary: ['background', 'stack'] },
+      locale: DEFAULT_LOCALE
     })
 
     expect(lesson.user).toContain('trilha "Entrevista para dev"')
@@ -278,7 +280,8 @@ describe('prompts das trilhas e do cenário', () => {
       level: 'A2',
       goal: 'entrevista para dev',
       errors: [],
-      track: { title: 'Entrevista para dev', vocabulary: ['background'] }
+      track: { title: 'Entrevista para dev', vocabulary: ['background'] },
+      locale: DEFAULT_LOCALE
     })
 
     expect(exercises.user).toContain('domínio "Entrevista para dev"')
@@ -292,7 +295,8 @@ describe('prompts das trilhas e do cenário', () => {
       unitTitle: 'Primeiros passos',
       level: 'A1',
       goal: 'viagem',
-      errors: []
+      errors: [],
+      locale: DEFAULT_LOCALE
     })
 
     expect(lesson.user).toContain('unidade "Primeiros passos"')
@@ -308,7 +312,8 @@ describe('prompts das trilhas e do cenário', () => {
       vocabulary: [],
       summary: null,
       lesson: null,
-      topic: null
+      topic: null,
+      locale: DEFAULT_LOCALE
     }
 
     const system = tutorSystem({
@@ -335,7 +340,8 @@ describe('prompts das trilhas e do cenário', () => {
       criteria: ['apresentar sua trajetória', 'descrever um projeto'],
       transcript: 'aluno: I maintain two services.\ntutor: Nice.',
       level: 'A2',
-      errors: [{ tag: 'articles', original: 'I am developer.', corrected: 'I am a developer.' }]
+      errors: [{ tag: 'articles', original: 'I am developer.', corrected: 'I am a developer.' }],
+      locale: DEFAULT_LOCALE
     })
 
     expect(prompt.user).toContain('1. apresentar sua trajetória')
@@ -351,7 +357,8 @@ describe('prompts das trilhas e do cenário', () => {
       lessonTitle: 'Pergunte sobre a vaga',
       objective: 'fazer perguntas',
       level: 'B1',
-      goal: 'entrevista para dev'
+      goal: 'entrevista para dev',
+      locale: DEFAULT_LOCALE
     })
 
     expect(prompt.user).toContain('openingLine')

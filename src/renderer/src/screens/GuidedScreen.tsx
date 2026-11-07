@@ -8,7 +8,7 @@ import type {
   ReviewRating,
   SettingsPayload
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 import { ExercisePlayer } from '../components/ExercisePlayer'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { TutorPanel } from '../components/TutorPanel'

@@ -7,14 +7,13 @@
 import type { CefrLevel, SkillEstimate } from '../shared/types'
 import { CEFR_LEVELS, levelIndex } from './cefr'
 import { bankEntries, type InterferenceEntry } from './interference'
-
 export interface ErrorFocusEntry {
   tag: string
   occurrences: number
   original: string
   corrected: string
   note: string | null
-  /** 'student' = saiu do caderno do aluno; 'bank' = âncora do banco PT-BR. */
+  /** 'student' = saiu do caderno do aluno; 'bank' = âncora do banco de interferência. */
   source: 'student' | 'bank'
 }
 
@@ -53,10 +52,16 @@ function bankEntry(entry: InterferenceEntry, occurrences = 0): ErrorFocusEntry {
 }
 
 /**
- * Prioriza o caderno do aluno; quando ele ainda está vazio, ancora no banco
- * PT-BR para o conteúdo já nascer mirando erros reais de falantes de português.
+ * Prioriza o caderno do aluno; quando ele ainda está vazio, ancora no banco de
+ * interferência do par (passado pelo caller) para o conteúdo já nascer mirando
+ * erros reais daquele idioma — pares sem banco passam `anchor = []` e o foco
+ * nasce só com o que o aluno produziu.
  */
-export function errorFocus(rows: NotebookRow[], limit = 5): ErrorFocusEntry[] {
+export function errorFocus(
+  rows: NotebookRow[],
+  limit = 5,
+  anchor: InterferenceEntry[] = bankEntries()
+): ErrorFocusEntry[] {
   const open = rows
     .filter((row) => row.resolvedAt === null)
     .slice()
@@ -69,7 +74,7 @@ export function errorFocus(rows: NotebookRow[], limit = 5): ErrorFocusEntry[] {
     if (picked.length >= limit) return picked
   }
 
-  for (const entry of bankEntries().slice(0, limit * 2)) {
+  for (const entry of anchor.slice(0, limit * 2)) {
     if (picked.some((pickedEntry) => pickedEntry.tag === entry.tag)) continue
     picked.push(bankEntry(entry))
     if (picked.length >= limit) break

@@ -1,5 +1,5 @@
 import type { GuidedStep } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 
 export const GUIDED_ORDER: GuidedStep[] = ['review', 'lesson', 'practice', 'tutor', 'recap']
 

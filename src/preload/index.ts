@@ -10,6 +10,7 @@ import type {
   GuidedSession,
   GuidedStep,
   HomeState,
+  LanguageOption,
   LessonDetail,
   LessonResultView,
   ModelInfo,
@@ -42,6 +43,10 @@ const api = {
     setGeminiKey: (key: string): Promise<SettingsPayload> =>
       ipcRenderer.invoke('settings:set-gemini-key', key),
     clearGeminiKey: (): Promise<SettingsPayload> => ipcRenderer.invoke('settings:clear-gemini-key')
+  },
+  /** M4: registro de idiomas (código, direção de escrita, tokenização). */
+  languages: {
+    list: (): Promise<LanguageOption[]> => ipcRenderer.invoke('languages:list')
   },
   models: {
     list: (provider: ProviderId): Promise<ModelInfo[]> => ipcRenderer.invoke('models:list', provider)
@@ -97,8 +102,9 @@ const api = {
         ipcRenderer.invoke('profile:onboard', input)
     },
     placement: {
-      generate: (goal?: string): Promise<PlacementTest> =>
-        ipcRenderer.invoke('placement:generate', goal),
+      generate: (
+        input?: string | { goal?: string; targetLang?: string; nativeLang?: string }
+      ): Promise<PlacementTest> => ipcRenderer.invoke('placement:generate', input),
       submit: (answers: number[]): Promise<PlacementResult> =>
         ipcRenderer.invoke('placement:submit', answers)
     },

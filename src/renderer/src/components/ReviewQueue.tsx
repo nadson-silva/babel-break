@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react'
 import type { JSX } from 'react'
 import type { CardView, ReviewRating } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { targetLanguage } from '../lang'
 
 interface ReviewQueueProps {
   cards: CardView[]
@@ -103,12 +104,18 @@ export function ReviewQueue({ cards, onAnswer, onSkip, skipLabel, dense }: Revie
         <span>{t.review.remaining.replace('{count}', String(remaining))}</span>
       </div>
 
-      <p className="mt-3 whitespace-pre-wrap text-base font-medium leading-relaxed text-ink">{card.front}</p>
+      <p className="mt-3 whitespace-pre-wrap text-base font-medium leading-relaxed text-ink" dir="auto" lang={targetLanguage()}>
+        {card.front}
+      </p>
       {card.hint && <p className="mt-2 text-xs text-muted">{card.hint}</p>}
 
       {revealed ? (
         <div className="mt-4 space-y-4">
-          <div className="whitespace-pre-wrap rounded-xl bg-panel-2 px-4 py-3 text-sm leading-relaxed text-ink">
+          <div
+            className="whitespace-pre-wrap rounded-xl bg-panel-2 px-4 py-3 text-sm leading-relaxed text-ink"
+            dir="auto"
+            lang={targetLanguage()}
+          >
             {card.back}
           </div>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

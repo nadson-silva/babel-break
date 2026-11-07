@@ -16,7 +16,7 @@
   --color-warn-soft: #33280f;
   --color-danger: #e57070;
   --color-danger-soft: #351a1a;
-  --font-sans: 'Inter', 'Noto Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Inter', 'Noto Sans', system-ui, -apple-system, 'Segoe UI', 'Noto Sans CJK JP', 'Noto Sans KR', 'Noto Sans Arabic', 'Noto Sans Hebrew', sans-serif;
 }
 
 html,

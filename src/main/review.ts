@@ -26,6 +26,7 @@ import {
   type CardPayload
 } from '../core/srs'
 import { recurringErrors } from './notebook'
+import { profileLocale } from './locale'
 import { getDb, schema } from './db'
 
 type CardRow = typeof schema.cards.$inferSelect
@@ -112,9 +113,10 @@ export function createCard(
 /** Cards de vocabulário de uma lição já gerada (template, sem IA). */
 export function cardsForLesson(profileId: number, lessonId: number, vocabulary: LessonVocabularyItem[]): number {
   let created = 0
+  const locale = profileLocale()
 
   for (const item of vocabulary.slice(0, 8)) {
-    if (createCard(profileId, vocabCard(item, lessonId), 'lesson', lessonId)) created += 1
+    if (createCard(profileId, vocabCard(item, lessonId, locale), 'lesson', lessonId)) created += 1
   }
 
   return created
@@ -123,12 +125,16 @@ export function cardsForLesson(profileId: number, lessonId: number, vocabulary: 
 /** Cards a partir dos erros recorrentes do caderno. */
 export function cardsForRecurringErrors(profileId: number, limit = 6): number {
   let created = 0
+  const locale = profileLocale()
 
   for (const error of recurringErrors(profileId, 2, limit)) {
     if (
       createCard(
         profileId,
-        errorCard({ original: error.original, corrected: error.corrected, tag: error.tag, note: error.note }),
+        errorCard(
+          { original: error.original, corrected: error.corrected, tag: error.tag, note: error.note },
+          locale
+        ),
         'error'
       )
     ) {
@@ -144,20 +150,22 @@ export function cardsForErrorsFrom(
   errors: { original: string; corrected: string; tag: string; note?: string | null }[]
 ): number {
   let created = 0
+  const locale = profileLocale()
   for (const error of errors) {
-    if (createCard(profileId, errorCard(error), 'error')) created += 1
+    if (createCard(profileId, errorCard(error, locale), 'error')) created += 1
   }
   return created
 }
 
 export function cardsForPhrases(
   profileId: number,
-  phrases: { en: string; pt: string }[],
+  phrases: { target: string; native: string }[],
   lessonId: number | null = null
 ): number {
   let created = 0
+  const locale = profileLocale()
   for (const phrase of phrases.slice(0, 3)) {
-    if (createCard(profileId, phraseCard(phrase.en, phrase.pt, lessonId), 'lesson', lessonId)) created += 1
+    if (createCard(profileId, phraseCard(phrase.target, phrase.native, lessonId, locale), 'lesson', lessonId)) created += 1
   }
   return created
 }

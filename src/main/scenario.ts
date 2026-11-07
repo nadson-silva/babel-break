@@ -24,7 +24,8 @@ import type {
   ScenarioView
 } from '../shared/types'
 import { clampLevel } from '../core/cefr'
-import { scenarioFeedbackPrompt, scenarioGenPrompt } from '../core/prompts'
+import { scenarioFeedbackPrompt, scenarioGenPrompt, promptLocale } from '../core/prompts'
+import { deterministicContentSupported, tokenize } from '../core/languages'
 import { scenarioFeedbackSchema, scenarioSchema, type ScenarioOutput } from '../core/schemas'
 import { detectBucket, fallbackScenario, scenarioFeedbackFrom } from '../core/tracks'
 import { phraseCard } from '../core/srs'
@@ -68,8 +69,13 @@ function toView(stored: StoredScenario): ScenarioView {
   }
 }
 
-/** Fallback determinístico: banco de domínio escrito à mão, sem gastar token. */
-function localScenario(input: { title: string; objective: string; goalTag?: string }): StoredScenario {
+/** Fallback determinístico: banco de domínio escrito à mão, sem gastar token. Só cobre o idioma-fixture (inglês). */
+function localScenario(input: { title: string; objective: string; goalTag?: string; targetLang: string }): StoredScenario {
+  if (!deterministicContentSupported(input.targetLang)) {
+    throw new Error(
+      'Sem IA disponível: o cenário determinístico offline só cobre inglês. Configure um provedor em Configurações.'
+    )
+  }
   const bucket = detectBucket(`${input.goalTag ?? ''} ${input.objective} ${input.title}`)
   return { ...fallbackScenario(bucket), source: 'fallback' }
 }
@@ -90,6 +96,7 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
   }
 
   const profile = getDefaultProfile()
+  const locale = promptLocale(profile.targetLang, profile.nativeLang)
   const goalTag = lesson.trackId != null ? trackContextOf(lesson)?.goalTag : undefined
   const objective = lesson.objective ?? lesson.title
 
@@ -99,7 +106,8 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
       lessonTitle: lesson.title,
       objective,
       level: clampLevel(profile.cefr),
-      goal: profile.goal ?? objective
+      goal: profile.goal ?? objective,
+      locale
     })
     const generated = await generateStructured(scenarioSchema, {
       system: prompt.system,
@@ -109,7 +117,7 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
     stored = { ...generated, source: 'ai', ...(goalTag ? { trackGoalTag: goalTag } : {}) }
   } catch (error) {
     console.warn('[scenario] geração por IA indisponível, usando o cenário local:', errorMessage(error))
-    stored = localScenario({ title: lesson.title, objective, goalTag })
+    stored = localScenario({ title: lesson.title, objective, goalTag, targetLang: profile.targetLang })
   }
 
   db.update(schema.lessons).set({ scenario: JSON.stringify(stored) }).where(eq(schema.lessons.id, lessonId)).run()
@@ -123,13 +131,15 @@ export async function ensureTopicScenario(topic: string): Promise<ScenarioView> 
   if (!objective) throw new Error('Escolha um tema para o roleplay.')
 
   const profile = getDefaultProfile()
+  const locale = promptLocale(profile.targetLang, profile.nativeLang)
 
   try {
     const prompt = scenarioGenPrompt({
       lessonTitle: objective,
       objective,
       level: clampLevel(profile.cefr),
-      goal: profile.goal ?? objective
+      goal: profile.goal ?? objective,
+      locale
     })
     const generated = await generateStructured(scenarioSchema, {
       system: prompt.system,
@@ -139,7 +149,7 @@ export async function ensureTopicScenario(topic: string): Promise<ScenarioView> 
     return toView({ ...generated, source: 'ai' })
   } catch (error) {
     console.warn('[scenario] tema livre sem IA, usando cenário local:', errorMessage(error))
-    return toView(localScenario({ title: objective, objective }))
+    return toView(localScenario({ title: objective, objective, targetLang: profile.targetLang }))
   }
 }
 
@@ -343,7 +353,10 @@ export async function finishScenarioRun(
   const studentRows = rows.filter((row) => row.role === 'user')
   const corrections: Correction[] = studentRows.flatMap((row) => parseJson<Correction[]>(row.corrections) ?? [])
   const speech = studentRows.map((row) => row.content).join(' ').toLowerCase()
-  const words = studentRows.reduce((sum, row) => sum + row.content.split(/\s+/).filter(Boolean).length, 0)
+  const profile = getDefaultProfile()
+  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  // Contagem de palavras pela escrita do idioma-alvo (CJK não usa espaços).
+  const words = studentRows.reduce((sum, row) => sum + tokenize(row.content, profile.targetLang).length, 0)
   const transcript = rows.map((row) => `${row.role === 'user' ? 'aluno' : 'tutor'}: ${row.content}`).join('\n')
 
   let contentScore: number
@@ -360,8 +373,9 @@ export async function finishScenarioRun(
       setting: scenario.setting,
       criteria: scenario.successCriteria,
       transcript,
-      level: clampLevel(getDefaultProfile().cefr),
-      errors: errorHints(profileId, 5)
+      level: clampLevel(profile.cefr),
+      errors: errorHints(profileId, 5),
+      locale
     })
 
     const graded = await generateStructured(scenarioFeedbackSchema, {
@@ -403,7 +417,7 @@ export async function finishScenarioRun(
     if (!phrase.improved?.trim()) continue
     const created = createCard(
       profileId,
-      phraseCard(phrase.improved, phrase.original, conversation.lessonId),
+      phraseCard(phrase.improved, phrase.original, conversation.lessonId, locale),
       'conversation',
       conversation.lessonId
     )

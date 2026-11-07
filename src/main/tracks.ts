@@ -32,7 +32,8 @@ import {
   normalizeTrackPlan,
   trackLessonLevel
 } from '../core/tracks'
-import { trackPlanPrompt } from '../core/prompts'
+import { deterministicContentSupported } from '../core/languages'
+import { promptLocale, trackPlanPrompt } from '../core/prompts'
 import { trackPlanSchema } from '../core/schemas'
 import { generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
@@ -249,6 +250,8 @@ export async function createTrackDraft(
   const db = getDb()
   const profile = getDefaultProfile()
   const level = trackLessonLevel(clampLevel(profile.cefr))
+  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const offlineReady = deterministicContentSupported(profile.targetLang)
 
   // "regerar esboço" reaproveita o rascunho em vez de acumular cópias — validado
   // antes de gastar a chamada.
@@ -257,7 +260,7 @@ export async function createTrackDraft(
     if (current.status !== 'draft') throw new Error('Só rascunhos podem ser regenerados.')
   }
 
-  const prompt = trackPlanPrompt({ objective, level, goal: profile.goal ?? objective })
+  const prompt = trackPlanPrompt({ objective, level, goal: profile.goal ?? objective, locale })
 
   let plan: TrackPlanDraft
   try {
@@ -266,13 +269,23 @@ export async function createTrackDraft(
       user: prompt.user,
       temperature: 0.35
     })
-    plan = draftOf(normalizeTrackPlan({ raw, objective, level }), objective, level, 'ai')
+    plan = draftOf(normalizeTrackPlan({ raw, objective, level, seedFill: offlineReady }), objective, level, 'ai')
   } catch (error) {
+    if (!offlineReady) {
+      throw new Error(
+        `A IA está indisponível e o banco de trilhas offline só cobre inglês. ` +
+          `Para montar uma trilha de ${locale.targetName}, configure um provedor em Configurações.`
+      )
+    }
     console.warn(
       '[tracks] esboço por IA indisponível, usando o banco local:',
       error instanceof Error ? error.message : error
     )
     plan = draftOf(fallbackTrackPlan({ objective, level }), objective, level, 'fallback')
+  }
+
+  if (plan.lessons.length === 0) {
+    throw new Error('A IA devolveu um esboço de trilha vazio para este idioma. Tente gerar novamente.')
   }
 
   const now = Date.now()
@@ -357,7 +370,11 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
   const plan = parseTrackPlan(row)
   if (!plan || plan.lessons.length === 0) throw new Error('O esboço desta trilha está vazio.')
 
-  const level = trackLessonLevel(clampLevel(getDefaultProfile().cefr))
+  const studentProfile = getDefaultProfile()
+  const level = trackLessonLevel(clampLevel(studentProfile.cefr))
+  // O seed do banco local de cenário é em inglês (idioma-fixture). Para outro
+  // idioma a persona nasce só pela IA na abertura — nunca um seed no idioma errado.
+  const withScenarioSeed = deterministicContentSupported(studentProfile.targetLang)
   const now = Date.now()
 
   db.transaction((tx) => {
@@ -371,9 +388,10 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
           objective: lesson.objective,
           level,
           position: index,
-          scenario: isScenarioLesson(index, plan.lessons.length)
-            ? JSON.stringify(scenarioSeed(plan, index))
-            : null,
+          scenario:
+            withScenarioSeed && isScenarioLesson(index, plan.lessons.length)
+              ? JSON.stringify(scenarioSeed(plan, index))
+              : null,
           createdAt: now
         })
         .returning()

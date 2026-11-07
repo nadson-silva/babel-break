@@ -8,8 +8,10 @@ import {
   fullSchedule,
   parseSchedule,
   previewIntervals,
-  vocabCard
+  vocabCard,
+  phraseCard
 } from './srs'
+import { promptLocale } from './prompts'
 
 describe('templates de card', () => {
   it('gera cloze a partir da frase de exemplo do vocabulário', () => {
@@ -43,6 +45,45 @@ describe('templates de card', () => {
     const a = vocabCard({ term: 'study', translation: 'estudar', example: 'I study English.' }, 1)
     const b = vocabCard({ term: 'Study', translation: 'estudar', example: 'I study English.' }, 2)
     expect(cardDedupeKey(a)).toBe(cardDedupeKey(b))
+  })
+})
+
+/** M4: templates de card que respeitam o idioma-alvo (nomes e escrita CJK). */
+describe('cards por idioma (M4)', () => {
+  const ja = promptLocale('ja', 'pt-BR')
+  const es = promptLocale('es', 'pt-BR')
+
+  it('faz cloze em CJK sem fronteiras de palavra', () => {
+    const card = vocabCard(
+      { term: '勉強', translation: 'estudo', example: '毎日制語の勉強をします。' },
+      3,
+      ja
+    )
+    expect(card.front).toContain('___')
+    expect(card.back).toContain('勉強')
+    expect(card.lessonId).toBe(3)
+  })
+
+  it('mantém a fronteira \b em escrita separada por espaço', () => {
+    // "edit" não deve ser clozeado dentro de "credit"
+    const card = vocabCard({ term: 'edit', translation: 'editar', example: 'I fixed the credit system.' }, 4)
+    expect(card.front).not.toContain('___')
+  })
+
+  it('nomeia o idioma-alvo nos textos dos cards', () => {
+    const phrase = phraseCard('Tengo una reunión.', 'Tenho uma reunião.', 5, es)
+    expect(phrase.front).toBe('Traduza para o espanhol: Tenho uma reunião.')
+    expect(phrase.hint).toContain('espanhol')
+
+    const error = errorCard(
+      { original: '私は学生', corrected: '私は学生です', tag: 'polite-form', note: 'Use です.' },
+      ja
+    )
+    expect(error.front).toContain('私は学生')
+    expect(error.hint).toContain('japonês')
+
+    const vocab = vocabCard({ term: 'ship', translation: 'enviar', example: 'Release today.' }, null, ja)
+    expect(vocab.hint).toContain('Diga o termo em japonês')
   })
 })
 

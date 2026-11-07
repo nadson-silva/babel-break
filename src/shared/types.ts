@@ -9,6 +9,24 @@ export interface AppSettings {
   ollamaBaseUrl: string
   correctionStyle: CorrectionStyle
   focusMix: number
+  /** Idioma da interface (M4): 'pt-BR' (padrão) | 'en'. */
+  uiLang: string
+}
+
+/**
+ * Opção de idioma para o seletor do onboarding (M4). Metadados vindos do
+ * registro do processo main (`core/languages.ts`) via IPC `languages:list`.
+ */
+export interface LanguageOption {
+  code: string
+  /** Nome em inglês (rótulo estável). */
+  name: string
+  /** Nome no próprio idioma ('日本語', 'español'…). */
+  nativeName: string
+  /** Nome em PT-BR, para textos do app. */
+  promptName: string
+  scriptDirection: 'ltr' | 'rtl'
+  tokenization: 'space' | 'cjk'
 }
 
 export interface SecureStorageInfo {
@@ -106,6 +124,10 @@ export interface ProfileState {
 export interface OnboardingInput {
   goal: string
   cefr: CefrLevel
+  /** M4: idioma ensinado (padrão 'en' para perfis antigos). */
+  targetLang?: string
+  /** M4: idioma das explicações (padrão 'pt-BR'). */
+  nativeLang?: string
 }
 
 export interface PlacementQuestion {
@@ -127,9 +149,10 @@ export interface PlacementResult {
   score: number
 }
 
+/** Par exemplo no idioma-alvo / tradução no idioma nativo (M4: nomes neutros). */
 export interface LessonExample {
-  en: string
-  pt: string
+  target: string
+  native: string
 }
 
 export interface LessonVocabularyItem {
@@ -467,10 +490,15 @@ export interface NotebookView {
   tags: NotebookTag[]
   openCount: number
   resolvedCount: number
-  /** Banco de interferência PT-BR (referência + fixtures). */
+  /** Banco de interferência do par nativo→alvo (referência + fixtures). */
   bank: { tag: string; wrong: string; right: string; note: string }[]
   /** Quantas ocorrências o app já corrigiu via banco, sem gastar token. */
   bankHits: number
+  /**
+   * M4: o par que o banco cobre; null = sem banco manual para este par e a
+   * correção é feita pela IA (a UI diz isso em vez de prometer "banco PT-BR").
+   */
+  bankPair: { native: string; target: string } | null
 }
 
 export interface LessonPitfall {

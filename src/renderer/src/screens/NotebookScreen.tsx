@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import type { NotebookTag, NotebookView } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { pairCodeLabel, nativeLabel } from '../lang'
+import { TargetText } from '../components/TargetText'
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -15,8 +17,15 @@ function categoryLabel(category: string): string {
 
 function sourceLabel(source: string | null): string | null {
   if (source === 'local') return t.notebook.fromLocal
-  if (source === 'bank') return t.notebook.fromBank
+  if (source === 'bank') return t.notebook.fromBank.replace('{pair}', pairCodeLabel())
   return null
+}
+
+function bankTitle(view: NotebookView | null): string {
+  const pair = view?.bankPair
+    ? `${view.bankPair.native.toUpperCase()}→${view.bankPair.target.toUpperCase()}`
+    : pairCodeLabel()
+  return t.notebook.bankTitle.replace('{pair}', pair)
 }
 
 function TagGroup({
@@ -61,9 +70,9 @@ function TagGroup({
           {tag.examples.map((example) => (
             <div key={example.id} className="rounded-xl bg-panel-2 px-4 py-3">
               <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-                <span className="text-danger/90 line-through decoration-danger/40">{example.original}</span>
+                <TargetText className="text-danger/90 line-through decoration-danger/40">{example.original}</TargetText>
                 <span className="text-faint">→</span>
-                <span className="font-medium text-accent">{example.corrected}</span>
+                <TargetText className="font-medium text-accent">{example.corrected}</TargetText>
               </div>
               {example.note && <p className="mt-1 text-xs leading-relaxed text-muted">{example.note}</p>}
               <div className="mt-2 flex items-center justify-between gap-3">
@@ -140,7 +149,7 @@ export function NotebookScreen(): JSX.Element {
             onClick={() => setShowBank((value) => !value)}
             className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
           >
-            {t.notebook.bankTitle}
+            {bankTitle(view)}
           </button>
         </div>
       </header>
@@ -155,8 +164,14 @@ export function NotebookScreen(): JSX.Element {
 
           {showBank && (
             <section className="rounded-2xl border border-line bg-panel p-5">
-              <h2 className="text-sm font-semibold">{t.notebook.bankTitle}</h2>
-              <p className="mt-1 text-xs leading-relaxed text-muted">{t.notebook.bankHelp}</p>
+              <h2 className="text-sm font-semibold">{bankTitle(view)}</h2>
+              {view && view.bankPair === null ? (
+                <p className="mt-1 text-xs leading-relaxed text-muted">{t.notebook.bankEmpty}</p>
+              ) : (
+                <p className="mt-1 text-xs leading-relaxed text-muted">
+                  {t.notebook.bankHelp.replace('{native}', nativeLabel())}
+                </p>
+              )}
               {view && view.bankHits > 0 && (
                 <p className="mt-2 text-xs text-accent">
                   {t.notebook.bankHits.replace('{count}', String(view.bankHits))}
@@ -166,9 +181,9 @@ export function NotebookScreen(): JSX.Element {
                 {view?.bank.map((entry) => (
                   <div key={entry.wrong} className="rounded-xl bg-panel-2 px-4 py-3">
                     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-                      <span className="text-danger/90 line-through decoration-danger/40">{entry.wrong}</span>
+                      <TargetText className="text-danger/90 line-through decoration-danger/40">{entry.wrong}</TargetText>
                       <span className="text-faint">→</span>
-                      <span className="font-medium text-accent">{entry.right}</span>
+                      <TargetText className="font-medium text-accent">{entry.right}</TargetText>
                       <span className="rounded-full bg-panel px-2 py-0.5 text-[10px] text-faint">{entry.tag}</span>
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-muted">{entry.note}</p>

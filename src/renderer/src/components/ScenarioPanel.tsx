@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { ScenarioFeedbackView, ScenarioView } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { TargetText } from './TargetText'
 
 function scoreLabel(value: number): string {
   return `${Math.round(value * 100)}%`
@@ -94,8 +95,8 @@ export function ScenarioFeedbackPanel({ run }: { run: ScenarioFeedbackView }): J
           <div className="mt-2 space-y-2">
             {run.bestPhrases.map((phrase) => (
               <div key={`${phrase.original}-${phrase.improved}`} className="rounded-xl bg-panel-2 px-3 py-2">
-                <div className="text-xs text-muted line-through decoration-line">{phrase.original}</div>
-                <div className="mt-0.5 text-sm text-ink">{phrase.improved}</div>
+                <TargetText className="block text-xs text-muted line-through decoration-line">{phrase.original}</TargetText>
+                <TargetText className="mt-0.5 block text-sm text-ink">{phrase.improved}</TargetText>
                 {phrase.reason && <div className="mt-0.5 text-[11px] text-faint">{phrase.reason}</div>}
               </div>
             ))}

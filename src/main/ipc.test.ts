@@ -41,8 +41,7 @@ describe('contrato IPC', () => {
     expect(missing).toEqual([])
   })
 
-  it('expõe o loop do M2 completo', () => {
-    for (const channel of [
+  it('expõe o loop do M2 completo', () => {    for (const channel of [
       'tutor:list',
       'tutor:latest',
       'tutor:open',
@@ -85,6 +84,10 @@ describe('contrato IPC', () => {
     ]) {
       expect(registered.has(channel), channel).toBe(true)
     }
+  })
+
+  it('expõe o registro de idiomas do M4', () => {
+    expect(registered.has('languages:list')).toBe(true)
   })
 
   it('não deixou canal órfão sem chamada no preload', () => {

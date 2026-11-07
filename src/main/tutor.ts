@@ -32,16 +32,19 @@ import { clampLevel } from '../core/cefr'
 import { recast as bankRecast } from '../core/interference'
 import {
   correctionPrompt,
+  promptLocale,
   summaryPrompt,
   tutorOpenerMessage,
   tutorSystem,
   type ErrorHint,
+  type PromptLocale,
   type ScenarioContext,
   type TutorContext
 } from '../core/prompts'
 import { correctionSetSchema, conversationSummarySchema } from '../core/schemas'
 import { currentModel, generateStructured } from './ai'
 import { getDb, getDefaultProfile, schema } from './db'
+import { profileInterferenceRules } from './locale'
 import { errorHints, recordCorrections } from './notebook'
 import { cardsForErrorsFrom } from './review'
 import { trackContextOf } from './tracks'
@@ -276,7 +279,8 @@ function buildContext(profileId: number, conversation: ConversationRow): TutorCo
     summary: conversation.summary,
     lesson: lesson ? { title: lesson.title, objective: lesson.objective, grammar: lesson.grammar } : null,
     topic: conversation.topic,
-    scenario
+    scenario,
+    locale: promptLocale(profile.targetLang, profile.nativeLang)
   }
 }
 
@@ -448,7 +452,7 @@ export async function sendTurn(
   const conversation = conversationOf(profileId, input.conversationId)
 
   if (!conversation) return { ok: false, error: 'Conversa não encontrada.' }
-  if (!text) return { ok: false, error: 'Escreva em inglês antes de enviar.' }
+  if (!text) return { ok: false, error: 'Escreva no idioma que você está estudando antes de enviar.' }
   if (!currentModel()) {
     return { ok: false, error: 'Nenhum modelo selecionado. Escolha um modelo em Configurações.' }
   }
@@ -461,14 +465,15 @@ export async function sendTurn(
     const profile = profileOf(profileId)
     const level = clampLevel(profile.cefr)
     const hints = errorHints(profileId, 6)
+    const locale = promptLocale(profile.targetLang, profile.nativeLang)
 
-    // 1. Correção determinística pelo banco PT-BR; depois a passada de IA.
+    // 1. Correção determinística pelo banco do par (se existir); depois a passada de IA.
     send({ requestId: input.requestId, type: 'status', message: 'corrigindo' })
-    const deterministic = bankCorrections(text)
-    const { model: modelCorrections, recast: aiRecast } = await correctWithModel(text, level, hints)
+    const deterministic = bankCorrections(text, profileInterferenceRules())
+    const { model: modelCorrections, recast: aiRecast } = await correctWithModel(text, level, hints, locale)
 
     const corrections = mergeCorrections(deterministic, modelCorrections)
-    const recast = aiRecast || bankRecast(text)
+    const recast = aiRecast || bankRecast(text, profileInterferenceRules())
 
     // 2. Caderno de erros + correções inline para o renderer.
     recordCorrections(profileId, corrections, {
@@ -543,10 +548,11 @@ async function streamTutorWithTokens(
 async function correctWithModel(
   text: string,
   level: CefrLevel,
-  hints: ErrorHint[]
+  hints: ErrorHint[],
+  locale: PromptLocale
 ): Promise<{ model: Correction[]; recast: string }> {
   try {
-    const prompt = correctionPrompt({ text, level, style: getSettings().correctionStyle, errors: hints })
+    const prompt = correctionPrompt({ text, level, style: getSettings().correctionStyle, errors: hints, locale })
     const graded = await generateStructured(correctionSetSchema, {
       system: prompt.system,
       user: prompt.user,
@@ -564,7 +570,8 @@ async function correctWithModel(
       recast: graded.recast.trim()
     }
   } catch (error) {
-    // Modelo fraco/indisponível: o banco PT-BR continua corrigindo sozinho.
+    // Modelo fraco/indisponível: com banco manual para o par, ele continua
+    // corrigindo sozinho; sem banco, o turno segue só com o recast do texto.
     console.warn('[tutor] correção por IA indisponível:', errorMessage(error))
     return { model: [], recast: '' }
   }
@@ -589,7 +596,12 @@ async function maybeSummarize(profileId: number, conversationId: number): Promis
     .join('\n')
 
   try {
-    const prompt = summaryPrompt({ current: conversation.summary, transcript })
+    const profile = profileOf(profileId)
+    const prompt = summaryPrompt({
+      current: conversation.summary,
+      transcript,
+      locale: promptLocale(profile.targetLang, profile.nativeLang)
+    })
     const result = await generateStructured(conversationSummarySchema, {
       system: prompt.system,
       user: prompt.user,

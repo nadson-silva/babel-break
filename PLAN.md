@@ -10,8 +10,8 @@
 | Decisão | Escolha |
 |---|---|
 | Plataforma | Desktop — **Electron** + electron-vite |
-| Idioma-alvo (v1) | **Inglês** |
-| Idioma nativo / explicações | **Português (PT-BR)** |
+| Idioma-alvo (v1) | **Qualquer idioma via IA**, escolhido no onboarding (M4); **inglês** é o fixture de qualidade com conteúdo offline |
+| Idioma nativo / explicações | **Português (PT-BR)** — par de idiomas do perfil; interface em PT-BR/EN |
 | Idioma da interface | **Português (PT-BR)** |
 | Experiência central | **Híbrida**: aulas estruturadas + conversas com tutor de IA |
 | Frequência | **Livre, sob demanda** — sem sessão diária, streak ou meta obrigatória |
@@ -147,7 +147,8 @@ Mais um caminho de **lição-relâmpago**: *"tenho entrevista amanhã"* → um c
 Agnóstico por design, mas com uma pequena tabela `languages` de metadados para direção de escrita (RTL),
 tokenização CJK para SRS e notas de prompt por idioma (tú/usted, keigo etc.).
 Ressalva do MVP: segmentação CJK para cards de vocabulário é mais difusa que línguas separadas por espaço —
-resolvida via extração por IA em vez de split por espaço.
+resolvida no M4 de forma determinística com `Intl.Segmenter` (Node/Electron já trazem o ICU), melhor que a
+extração por IA prevista: não gasta token nem erra.
 
 ## 6. Stack
 
@@ -226,8 +227,8 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M1 — uma lição** (3–5 d) | onboarding, nivelamento, plano de currículo, geração de lição, player de exercícios + correção, persistência | completa uma lição gerada do início ao fim | ✅ concluído |
 | **M2 — o loop** (4–6 d) | chat com tutor + correções inline, caderno de erros com banco PT-BR, cards FSRS sob demanda, sessão guiada opcional, "continuar de onde parei" | a aula #2 visivelmente se adapta à #1, sem exigir frequência | ✅ concluído |
 | **M3 — trilhas de foco** (3–4 d) | geração + aprovação de trilha, mix nas recomendações, modo cenário, feedback de cenário | "entrevista para dev" gera trilha e um roleplay com rubrica | ✅ concluído |
-| **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ⏭ próximo |
-| **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | — |
+| **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ✅ concluído |
+| **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | ⏭ próximo |
 | **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | — |
 
 Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
@@ -247,6 +248,25 @@ lição de trilha restrita às palavras-alvo do domínio nos prompts de `lesson_
 cenário quando a lição de foco pede roleplay, e tela **Trilhas** com revisão do esboço antes de
 comprometer. Testes: `src/core/tracks.test.ts` e `src/main/tracks.integration.test.ts`; smoke test com
 IA real em `src/main/m3.smoke.test.ts` (roda com `LT_SMOKE=1`).
+
+Notas do que ficou pronto no M4: `core/languages.ts` (registro de 17 idiomas com direção de escrita,
+tokenização e notas de prompt; tabela `languages` semeada no banco no startup), `main/locale.ts`
+(par do perfil → regras, prompts e segmentação), prompts de **todas** as tarefas parametrizados por
+`PromptLocale` (nada de "inglês/português" fixos fora do default; tags seguem kebab-case por contrato),
+exemplos de lição viram `{target, native}` (com leitura tolerante ao formato antigo `{en, pt}`),
+abstração da correção via `interferenceRulesFor(target, native)` — banco PT-BR→inglês (33 regras) +
+novo PT-BR→espanhol (11 regras) como prova; par sem banco = correção 100% por IA, e o caderno mostra
+isso (`bankPair`), gerador determinístico é explicitamente o fixture de inglês e degrada com erro
+claro nos demais idiomas (currículo, lição, trilha e cenário), CJK com `Intl.Segmenter` na ordem de
+frase/cloze/cards e `dir="auto"`/`lang` no texto-alvo (RTL sem espelhar a UI), `normalizeText`
+multilíngue (preserva `\p{L}`, harakat sem destruir kana/Hangul), onboarding com passo de **idiomas**
+(alvo + explicações; nivelamento já no idioma-alvo) e i18n da interface com dicionários tipados
+`pt-BR`/`en`, `t` proxy e troca em runtime em Configurações. Testes: `src/core/languages.test.ts`,
+`src/core/prompts.test.ts`, `src/core/grading.test.ts`, paridade i18n em
+`src/renderer/src/i18n/i18n.test.ts`, integração `src/main/m4.integration.test.ts` e smoke com IA em
+`src/main/m4.smoke.test.ts` (roda com `LT_SMOKE=1`). Pendências conscientes: textos gerados no main
+(recap de fechamento, rótulo de intervalo FSRS) ainda saem em PT-BR: são conteúdo do modelo do
+aluno gerado no main, não strings de interface — traduzi-los é lapidação para o M5.
 
 A base vem antes das trilhas de propósito: trilhas reutilizam a mesma máquina de lição/exercício/SRS;
 construí-las primeiro significaria construir tudo duas vezes.

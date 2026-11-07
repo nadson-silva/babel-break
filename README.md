@@ -1,8 +1,9 @@
 # Language Teacher
 
-Tutor de inglês para brasileiros: app desktop local-first com aulas estruturadas e conversas
-com um tutor de IA. Roda **Ollama** (local, offline) ou **Gemini** (nuvem, com chave de API).
-Sem sessão diária, streak ou meta obrigatória — você estuda quando quiser.
+Tutor de idiomas para falantes de português: app desktop local-first com aulas estruturadas e
+conversas com um tutor de IA. Ensina **qualquer idioma** via IA (inglês é o fixture de qualidade,
+com conteúdo extra offline). Roda **Ollama** (local, offline) ou **Gemini** (nuvem, com chave de
+API). Sem sessão diária, streak ou meta obrigatória — você estuda quando quiser.
 
 > Plano completo de produto e arquitetura: [PLAN.md](./PLAN.md)
 
@@ -58,8 +59,27 @@ Sem sessão diária, streak ou meta obrigatória — você estuda quando quiser.
 - [x] "Tenho entrevista amanhã": roleplay por tema livre, sem precisar criar trilha
 - [x] Trilha arquivada preserva o progresso; reativar devolve as lições como estavam
 
-Próximo: M4 — internacionalização (parametrização de prompts, escolha de idioma no onboarding,
-suporte a RTL/CJK, i18n da interface).
+**M4 concluído** — internacionalização:
+
+- [x] Prompts parametrizados por par de idiomas: nada de "inglês/português" fixos — o par
+      `targetLang`/`nativeLang` do perfil entra em **todo** contrato (`core/languages.ts` + `locale`)
+- [x] Escolha de idioma no onboarding (inglês, espanhol, francês, japonês, árabe… 17 no registro)
+      + idioma das explicações; teste de nivelamento já nasce no idioma-alvo
+- [x] Abstração da correção: banco de interferência **por par** (PT-BR→inglês e PT-BR→espanhol
+      escritos à mão) quando existe; para pares sem banco, a correção é 100% por IA — mesma
+      interface, duas engines (`interferenceRulesFor`)
+- [x] Suporte RTL/CJK: direção de escrita e tokenização por idioma (tabela `languages` semeada
+      no banco), `dir="auto"` no texto do idioma-alvo, segmentação CJK com `Intl.Segmenter`
+      (ordem de frase e cloze funcionam em japonês/chinês/coreano)
+- [x] Normalização de correção multilíngue: gabarito compara `\p{L}/\p{N}` de qualquer escrita,
+      remove diacríticos árabes/latinos sem destruir kana nem Hangul
+- [x] Interface i18n: dicionários `pt-BR` e `en` completos com teste de paridade de chaves,
+      seletor de idioma da interface em Configurações, sem recarregar o app
+- [x] Degradação honesta: o gerador determinístico é o *fixture de inglês* do plano — sem IA e
+      sem idioma-alvo inglês, o app avisa em vez de inventar conteúdo
+
+Próximo: M5 — produto (dashboard, pré-geração/cache, offline, reportar conteúdo ruim,
+empacotamento AppImage, script de eval por idioma).
 
 ## Requisitos
 
@@ -89,7 +109,7 @@ node node_modules/electron/install.js
 ```bash
 npm run dev        # hot reload do renderer
 npm run typecheck  # tsc nos projetos node e web
-npm test           # testes do domínio (banco PT-BR, FSRS, adaptação, integração do loop)
+npm test           # testes do domínio (bancos por par, FSRS, adaptação, i18n, integração do loop)
 npm run build      # build de produção em out/
 npm start          # roda o build de produção
 ```
@@ -105,13 +125,15 @@ GEMINI_API_KEY=… node scripts/eval.mjs --gemini gemini-2.5-flash
 ```
 
 Com modelo local pequeno é esperado ver contratos falharem — é exatamente o caso em que
-o app degrada para o gerador determinístico (e o banco PT-BR continua corrigindo).
+o app degrada para o gerador determinístico (inglês) e o banco de interferência do par continua
+corrigindo. Sem banco e sem IA para o idioma-alvo, o app avisa em vez de fingir que gerou.
 
-Há também um smoke test dos contratos do M3 (trilha, cenário e rubrica) que só roda
-quando você pede, com um modelo de pé:
+Há também smoke tests que só rodam quando você pede, com um modelo de pé — os contratos do M3
+(trilha, cenário e rubrica) e o "ensina qualquer idioma" do M4 (currículo e lição em espanhol):
 
 ```bash
 LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m3.smoke.test.ts
+LT_SMOKE=1 LT_MODEL=gemma4:12b npx vitest run src/main/m4.smoke.test.ts
 ```
 
 ## Ollama (local)
@@ -175,6 +197,7 @@ src/
     guided.ts      sessão guiada de 5 etapas (estado persistido em study_sessions)
     tracks.ts      trilhas de foco: esboço → revisão → aprovação → lições da trilha
     scenario.ts    modo cenário: persona do roleplay e rubrica de tarefa × língua
+    locale.ts      par de idiomas do perfil → regras do banco, prompts e tokenização
     home.ts        agregado da home (aula, conversa, revisão, caderno, trilha e mix)
     ipc.ts         handlers de settings/provedor + registro dos módulos
     loop.ts        IPC do loop (tutor, notebook, review, guided)
@@ -182,19 +205,22 @@ src/
     settings.ts    defaults e persistência
   core/            domínio puro (testável com Vitest, portável)
     cefr.ts           níveis CEFR e mapeamento de pontuação
-    interference.ts   banco de interferência PT-BR + deteção/recast determinístico
-    correction.ts     fusão banco+IA e política de correção
+    languages.ts      registro de idiomas: direção de escrita, tokenização, notas de prompt, Intl.Segmenter
+    interference.ts   bancos de interferência **por par** (PT-BR→EN com 33 regras, PT-BR→ES) + deteção/recast
+    correction.ts     fusão banco+IA e política de correção (banco é opcional — par sem banco = só IA)
     adapt.ts          errorFocus (o que a próxima lição mira) e reestimativa de nível
-    srs.ts            templates de card + wrapper do FSRS
-    prompts.ts        contratos de prompt (currículo, lição, exercício, tutor, correção, trilha, cenário)
+    srs.ts            templates de card + wrapper do FSRS (cloze consciente de CJK)
+    prompts.ts        contratos de prompt **parametrizados pelo par de idiomas** (currículo, lição, exercício, tutor, correção, trilha, cenário)
     schemas.ts        schemas zod das saídas estruturadas
-    grading.ts        correção local dos tipos objetivos
-    fallback.ts       gerador determinístico de currículo, lição e exercícios
+    grading.ts        correção local dos tipos objetivos (normalização multilíngue)
+    fallback.ts       gerador determinístico de currículo, lição e exercícios (fixture de inglês)
     tracks.ts         trilha determinística, cadência de cenário e mix de recomendação
   preload/         bridge segura para o renderer
-  renderer/        React + Tailwind (UI em PT-BR)
+  renderer/        React + Tailwind (UI PT-BR / EN via `i18n/`)
+    i18n/          dicionários pt-BR.ts e en.ts + registro com troca em runtime (teste de paridade)
+    lang.ts        idioma-alvo em runtime: rótulos {lang}/{native}/{pair} e dir/lang
     screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Sessão guiada, Configurações
-    components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, Sidebar
+    components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, Sidebar, TargetText
   shared/          tipos compartilhados entre main e renderer
 test/              stub do Electron para os testes de integração do processo main
 scripts/eval.mjs   harness manual de qualidade de IA
@@ -205,8 +231,8 @@ scripts/eval.mjs   harness manual de qualidade de IA
 O valor do app é o **modelo do aluno**, lido e atualizado a cada interação:
 
 ```
-frase do aluno ──► banco PT-BR (determinístico, offline) ─┐
-                 └─► correção por IA ────────────────────┴─► fusão ─► caderno de erros
+frase do aluno ──► banco de interferência do par (determinístico, offline) ─┐
+                 └─► correção por IA ──────────────────────────────────────┴─► fusão ─► caderno de erros
                                                                          │
    ┌─────────────────────────────────────────────────────────────────────┘
    ▼
@@ -220,8 +246,10 @@ Detalhes que importam:
 
 - **Recorrência, não lista**: o mesmo erro (tag + frase) soma `occurrences` no caderno, em vez
   de virar três linhas iguais.
-- **Banco antes do modelo**: 30 pares PT-BR → inglês corrigem sem rede e sem token
-  (`core/interference.ts`); a IA só acrescenta o que o banco não conhece.
+- **Banco antes do modelo**: pares errado→certo escritos à mão, por par de idiomas
+  (PT-BR→inglês e PT-BR→espanhol), corrigem sem rede e sem token
+  (`core/interference.ts`); a IA só acrescenta o que o banco não conhece — e é ela inteira
+  quando o par não tem banco.
 - **Revisão em pull**: os cards vencidos são *oferecidos* na home, na aula e na conversa. O app
   nunca cobra frequência — sem streak, sem meta, sem culpa.
 - **Adaptação visível**: a lição traz o painel "Esta lição mira seus erros", os armadilhas
@@ -266,4 +294,41 @@ Decisões que sustentam o "não é só um chatbot":
   abertura; reabrir não regasta tokens nem troca a tarefa no meio do caminho.
 - **Fechamento real**: as 3 melhores frases do aluno viram cards SRS, o drill de follow-up volta
   na tela e `speaking` entra na reestimativa de nível junto com as outras habilidades.
+
+## Como o app ensina qualquer idioma (M4)
+
+O par de idiomas do perfil (`nativeLang` → `targetLang`) é dado de domínio, não texto de prompt:
+
+```
+onboarding ──► profiles.target_lang / native_lang
+                       │
+                       ▼
+        core/languages.ts (registro puro) ──► tabela languages no SQLite (metadados)
+                       │
+   ┌───────────────────┼──────────────────────────────┐
+   ▼                   ▼                              ▼
+prompts            correção                      escrita
+locale no system   interferenceRulesFor(target,  scriptDirection: dir="auto" no
+prompt de TODA     native) → banco manual se     texto-alvo (RTL) + tokenization:
+tarefa             existir; senão [] → 100% IA    Intl.Segmenter (CJK) em ordem de
+                   (fusão, tags e caderno iguais) frase, cloze, cards e contagem
+```
+
+- **Um só lugar decide o par**: `promptLocale(target, native)` injeta `targetName`/`nativeName`
+  e as notas de escrita (tu/usted, desu/masu, MSA…) em todos os contratos de prompt. Tags de
+  erro continuam kebab-case em inglês por contrato interno.
+- **Correção é uma interface, não um banco**: o banco PT-BR→inglês (§8 do plano) ganhou irmão
+  (PT-BR→espanhol) para provar a abstração; para os demais pares a passada determinística é
+  vazia por design e o caderno mostra isso ("correção feita pela IA").
+- **CJK sem spaces, árabe sem espelhos**: `normalizeText` preserva `\p{L}/\p{N}` de qualquer
+  escrita (e não destrói o dakuten do japonês), o "ordene a frase" segmenta com `Intl.Segmenter`
+  e o `dir="auto"` só se aplica ao texto do idioma ensinado — a UI PT-BR/EN continua LTR.
+- **Interface traduzível, com contrato**: dicionários tipados (`pt-BR.ts`, `en.ts`) validados
+  por teste de paridade de chaves; troca em runtime via Configurações.
+- **Regras do jogo offline**: o gerador determinístico e o banco de domínios das trilhas são o
+  *fixture de inglês* do plano. Sem IA, outro idioma-alvo recebe um erro claro — nunca frases
+  inventadas em inglês.
+- Limitações conhecidas: alguns textos gerados no processo main (recapitulação de fechamento,
+  rótulos de intervalo do FSRS) ainda saem em PT-BR — são conteúdo do modelo do aluno, não
+  strings de interface.
 

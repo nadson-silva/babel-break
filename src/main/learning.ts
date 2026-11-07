@@ -9,6 +9,7 @@ import type {
   GradeFeedback,
   LessonContentView,
   LessonDetail,
+  LessonExample,
   LessonResultView,
   LessonStatus,
   LessonSummary,
@@ -23,6 +24,7 @@ import type {
 import type { ErrorFocusEntry } from '../core/adapt'
 import { clampLevel, levelIndex, levelFromScore, CEFR_LEVELS } from '../core/cefr'
 import { fallbackCurriculum, fallbackExercises, fallbackLessonContent, pitfallsFrom } from '../core/fallback'
+import { deterministicContentSupported, tokenize } from '../core/languages'
 import { fallbackTrackVocabulary } from '../core/tracks'
 import {
   gradeDeterministic,
@@ -36,6 +38,7 @@ import {
   gradePrompt,
   lessonContentPrompt,
   placementPrompt,
+  promptLocale,
   type ErrorHint
 } from '../core/prompts'
 import {
@@ -94,6 +97,24 @@ function parseJson<T>(value: string | null | undefined): T | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Lê `lessons.content` com tolerância ao formato pré-M4, que usava as chaves
+ * fixas `en`/`pt` nos exemplos. Conteúdo antigo continua abrindo; conteúdo
+ * novo é salvo já em `target`/`native`.
+ */
+export function readLessonContent(value: string | null | undefined): LessonContentView | null {
+  type LegacyExample = Partial<LessonExample> & { en?: string; pt?: string }
+  const raw = parseJson<Omit<LessonContentView, 'examples'> & { examples?: LegacyExample[] }>(value)
+  if (!raw) return null
+
+  const examples: LessonExample[] = (raw.examples ?? []).map((example) => ({
+    target: example.target ?? example.en ?? '',
+    native: example.native ?? example.pt ?? ''
+  }))
+
+  return { ...(raw as LessonContentView), examples }
 }
 
 function toStatus(value: string | null | undefined): LessonStatus {
@@ -305,7 +326,8 @@ export function generateCurriculum(): Promise<CurriculumView> {
     if (unitCount(profile.id) > 0) return curriculumView()
 
     const level = toCefr(profile.cefr)
-    const prompt = curriculumPrompt({ goal: profile.goal ?? '', level })
+    const locale = promptLocale(profile.targetLang, profile.nativeLang)
+    const prompt = curriculumPrompt({ goal: profile.goal ?? '', level, locale })
 
     let plan: CurriculumOutput
     try {
@@ -315,6 +337,12 @@ export function generateCurriculum(): Promise<CurriculumView> {
         temperature: 0.3
       })
     } catch (error) {
+      if (!deterministicContentSupported(profile.targetLang)) {
+        throw new Error(
+          `A IA está indisponível e o plano de currículo offline só cobre inglês. ` +
+            `Para montar um currículo de ${locale.targetName}, configure um provedor em Configurações.`
+        )
+      }
       console.warn(
         '[learning] geração do currículo falhou, usando plano determinístico:',
         error instanceof Error ? error.message : error
@@ -427,8 +455,10 @@ async function ensureLessonGenerated(
   const focus = focusFor(profile.id, 5)
   const track = lesson.trackId != null ? trackContextOf(lesson) : null
   const scopeTitle = owner.trackTitle ?? owner.unitTitle ?? ''
+  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const offlineReady = deterministicContentSupported(profile.targetLang)
 
-  let content = parseJson<LessonContentView>(lesson.content)
+  let content = readLessonContent(lesson.content)
 
   if (!content) {
     const hints = recentErrorHints(profile.id)
@@ -439,6 +469,7 @@ async function ensureLessonGenerated(
       level,
       goal: profile.goal ?? '',
       errors: hints,
+      locale,
       track: track ? { title: track.title, vocabulary: track.vocabulary } : null
     })
 
@@ -453,6 +484,12 @@ async function ensureLessonGenerated(
       })
       source = 'ai'
     } catch (error) {
+      if (!offlineReady) {
+        throw new Error(
+          `A IA está indisponível e o gerador offline só cobre inglês (o idioma-fixture do app). ` +
+            `Para gerar conteúdo de ${locale.targetName}, configure um provedor em Configurações.`
+        )
+      }
       console.warn(
         '[learning] geração do conteúdo falhou, usando conteúdo determinístico:',
         error instanceof Error ? error.message : error
@@ -522,6 +559,7 @@ async function ensureLessonGenerated(
     level: content.level,
     goal: profile.goal ?? '',
     errors: hints,
+    locale,
     track: track ? { title: track.title, vocabulary: track.vocabulary } : null
   })
 
@@ -536,11 +574,17 @@ async function ensureLessonGenerated(
     })
     source = 'ai'
   } catch (error) {
+    if (!offlineReady) {
+      throw new Error(
+        `A IA está indisponível e o gerador offline só cobre inglês. ` +
+          `Para gerar exercícios de ${locale.targetName}, configure um provedor em Configurações.`
+      )
+    }
     console.warn(
       '[learning] geração de exercícios falhou, usando exercícios determinísticos:',
       error instanceof Error ? error.message : error
     )
-    generated = fallbackExercises(exerciseLevel, focus)
+    generated = fallbackExercises(exerciseLevel, focus, locale)
     source = 'fallback'
   }
 
@@ -555,8 +599,9 @@ async function ensureLessonGenerated(
     }
 
     if (exercise.type === 'order') {
-      const baseTokens =
-        exercise.tokens.length > 0 ? exercise.tokens : answer.split(/\s+/).filter(Boolean)
+      // Sem modelo fraco devolvendo tokens vazios: segmentação respeita a
+      // escrita do idioma-alvo (espaço ou CJK via Intl.Segmenter).
+      const baseTokens = exercise.tokens.length > 0 ? exercise.tokens : tokenize(answer, profile.targetLang)
       tokens = shuffleTokens(baseTokens, lesson.id * 1000 + index)
     }
 
@@ -619,7 +664,7 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
   const fresh = getOwnedLesson(lessonId, profile.id)
   if (!fresh) throw new Error('Lição não encontrada.')
 
-  const content = parseJson<LessonContentView>(fresh.lesson.content)
+  const content = readLessonContent(fresh.lesson.content)
   if (!content) throw new Error('Não foi possível carregar o conteúdo da lição.')
 
   const exerciseRows = db
@@ -719,7 +764,8 @@ export async function answerExercise(input: {
       alternatives: answerKey.alternatives ?? [],
       explanation: answerKey.explanation ?? '',
       response,
-      level: toCefr(lesson?.level)
+      level: toCefr(lesson?.level),
+      locale: promptLocale(profile.targetLang, profile.nativeLang)
     })
 
     try {
@@ -830,8 +876,9 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
     .where(eq(schema.lessons.id, input.lessonId))
     .get()
 
-  const vocabulary = parseJson<LessonContentView>(lessonRow?.content)?.vocabulary ?? []
-  const examples = parseJson<LessonContentView>(lessonRow?.content)?.examples ?? []
+  const lessonContent = readLessonContent(lessonRow?.content)
+  const vocabulary = lessonContent?.vocabulary ?? []
+  const examples = lessonContent?.examples ?? []
 
   let cardsCreated = cardsForLesson(profile.id, input.lessonId, vocabulary)
   // Frases modelas da lição viram card de produção (traduzir → falar).
@@ -895,9 +942,19 @@ export function pendingLessons(profileId: number): { base: LessonSummary[]; focu
   return { base, focus }
 }
 
-export async function generatePlacement(goal?: string): Promise<PlacementTest> {
+export async function generatePlacement(input: {
+  goal?: string
+  targetLang?: string
+  nativeLang?: string
+} = {}): Promise<PlacementTest> {
   const profile = getDefaultProfile()
-  const prompt = placementPrompt((goal ?? profile.goal ?? '').trim())
+  // Durante o onboarding o idioma já foi escolhido mas ainda não foi salvo no
+  // perfil — o teste de nivelamento nasce no idioma-alvo certo na hora.
+  const locale = promptLocale(
+    normalizeLangCode(input.targetLang) ?? profile.targetLang,
+    normalizeLangCode(input.nativeLang) ?? profile.nativeLang
+  )
+  const prompt = placementPrompt((input.goal ?? profile.goal ?? '').trim(), locale)
 
   const generated = await generateStructured(placementSchema, {
     system: prompt.system,
@@ -971,6 +1028,14 @@ export function submitPlacement(answers: number[]): PlacementResult {
   return { cefr, correct, total: stored.questions.length, score }
 }
 
+/** Código de idioma defensivamente normalizado ('En ' → 'en'); sem tabela, sem rejeitar o usuário. */
+function normalizeLangCode(value: string | null | undefined): string | null {
+  const trimmed = (value ?? '').trim()
+  if (!/^[A-Za-z]{2}(-[A-Za-z]{2,4})?$/.test(trimmed)) return null
+  const [base, region] = trimmed.split('-')
+  return region ? `${base.toLowerCase()}-${region.toUpperCase()}` : base.toLowerCase()
+}
+
 export function completeOnboarding(input: OnboardingInput): ProfileState {
   const db = getDb()
   const profile = getDefaultProfile()
@@ -982,10 +1047,24 @@ export function completeOnboarding(input: OnboardingInput): ProfileState {
   const goal = input.goal.trim()
   if (!goal) throw new Error('Escolha ou escreva um objetivo.')
 
+  // M4: o par de idiomas nasce aqui e governa prompts, banco de correção e
+  // escrita (RTL/CJK) para todo o resto do app.
+  const targetLang = normalizeLangCode(input.targetLang) ?? profile.targetLang
+  const nativeLang = normalizeLangCode(input.nativeLang) ?? profile.nativeLang
+  const alreadyDone = profile.onboardingCompletedAt != null
+
+  if (alreadyDone && (targetLang !== profile.targetLang || nativeLang !== profile.nativeLang)) {
+    throw new Error(
+      'O idioma ensinado só pode ser escolhido no primeiro onboarding: o currículo salvo pertence ao idioma anterior.'
+    )
+  }
+
   db.update(schema.profiles)
     .set({
       goal,
       cefr: input.cefr,
+      targetLang,
+      nativeLang,
       focusMix: getSettings().focusMix,
       onboardingCompletedAt: profile.onboardingCompletedAt ?? Date.now()
     })
@@ -1011,7 +1090,11 @@ export function registerLearningIpc(): void {
 
   ipcMain.handle('profile:onboard', (_event, input: OnboardingInput) => completeOnboarding(input))
 
-  ipcMain.handle('placement:generate', (_event, goal?: string) => generatePlacement(goal))
+  ipcMain.handle(
+    'placement:generate',
+    (_event, input?: string | { goal?: string; targetLang?: string; nativeLang?: string }) =>
+      generatePlacement(typeof input === 'string' ? { goal: input } : (input ?? {}))
+  )
 
   ipcMain.handle('placement:submit', (_event, answers: number[]) => submitPlacement(answers))
 

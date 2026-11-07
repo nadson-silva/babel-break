@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import type { GuidedSession, ProfileState, SettingsPayload } from '../../shared/types'
+import type { GuidedSession, LanguageOption, ProfileState, SettingsPayload } from '../../shared/types'
 import { Sidebar, type View } from './components/Sidebar'
-import { t } from './i18n/pt-BR'
+import { t, setUiLanguage } from './i18n'
+import { setLanguageOptions, setNativeLanguage, setTargetLanguage } from './lang'
 import { GuidedScreen } from './screens/GuidedScreen'
 import { HomeScreen } from './screens/HomeScreen'
 import { LessonScreen } from './screens/LessonScreen'
@@ -24,7 +25,7 @@ function Splash({ error }: { error: string | null }): JSX.Element {
         <div>
           <div className="text-sm font-semibold">{t.app.name}</div>
           <div className="mt-1 text-xs text-faint">
-            {error ? error : 'Carregando banco local e configurações…'}
+            {error ? error : t.common.loading}
           </div>
         </div>
       </div>
@@ -36,6 +37,7 @@ export default function App(): JSX.Element {
   const [view, setView] = useState<View>('home')
   const [settings, setSettings] = useState<SettingsPayload | null>(null)
   const [profileState, setProfileState] = useState<ProfileState | null>(null)
+  const [languages, setLanguages] = useState<LanguageOption[]>([])
   const [activeLessonId, setActiveLessonId] = useState<number | null>(null)
   const [guided, setGuided] = useState<GuidedSession | null>(null)
   const [tutorConversation, setTutorConversation] = useState<number | null>(null)
@@ -46,14 +48,16 @@ export default function App(): JSX.Element {
 
   const reload = useCallback(async (): Promise<void> => {
     try {
-      const [nextSettings, nextProfile, review] = await Promise.all([
+      const [nextSettings, nextProfile, review, languageList] = await Promise.all([
         window.api.settings.get(),
         window.api.learning.profile.get(),
-        window.api.review.state(1)
+        window.api.review.state(1),
+        window.api.languages.list().catch(() => [] as LanguageOption[])
       ])
       setSettings(nextSettings)
       setProfileState(nextProfile)
       setDueCount(review.dueCount)
+      setLanguages(languageList)
       setError(null)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -64,6 +68,15 @@ export default function App(): JSX.Element {
     void reload()
   }, [reload])
 
+  // M4: idioma da interface e idioma ensinado viram estado de runtime antes de
+  // qualquer tela renderizar — os textos (`t`) e o `<TargetText>` leem daqui.
+  if (settings) setUiLanguage(settings.uiLang)
+  if (profileState) {
+    setTargetLanguage(profileState.profile.targetLang)
+    setNativeLanguage(profileState.profile.nativeLang)
+  }
+  setLanguageOptions(languages)
+
   if (!settings || !profileState) {
     return <Splash error={error} />
   }
@@ -72,6 +85,7 @@ export default function App(): JSX.Element {
     return (
       <OnboardingScreen
         settings={settings}
+        languages={languages}
         onDone={(state) => {
           setProfileState(state)
           setView('home')
@@ -201,7 +215,12 @@ export default function App(): JSX.Element {
         ) : view === 'notebook' ? (
           <NotebookScreen key={`notebook-${refreshKey}`} />
         ) : (
-          <SettingsScreen settings={settings} onChanged={setSettings} />
+          <SettingsScreen
+            settings={settings}
+            languages={languages}
+            profile={profileState.profile}
+            onChanged={setSettings}
+          />
         )}
       </main>
     </div>

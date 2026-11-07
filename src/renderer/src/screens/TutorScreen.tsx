@@ -9,7 +9,7 @@ import type {
   ScenarioRunView,
   SettingsPayload
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { TutorPanel } from '../components/TutorPanel'
 

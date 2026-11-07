@@ -8,7 +8,8 @@ const DEFAULTS: AppSettings = {
   ollamaModel: '',
   ollamaBaseUrl: 'http://127.0.0.1:11434',
   correctionStyle: 'both',
-  focusMix: 0.3
+  focusMix: 0.3,
+  uiLang: 'pt-BR'
 }
 
 const SETTINGS_KEY = 'settings'

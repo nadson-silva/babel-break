@@ -2,20 +2,23 @@ import { useState } from 'react'
 import type { JSX } from 'react'
 import type {
   CefrLevel,
+  LanguageOption,
   OnboardingInput,
   PlacementResult,
   PlacementTest,
   ProfileState,
   SettingsPayload
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t, languagePickerLabel } from '../i18n'
+import { setTargetLanguage, targetLabel } from '../lang'
 
 interface OnboardingScreenProps {
   settings: SettingsPayload
+  languages: LanguageOption[]
   onDone: (state: ProfileState) => void
 }
 
-type Step = 'goal' | 'level' | 'test' | 'result'
+type Step = 'language' | 'goal' | 'level' | 'test' | 'result'
 
 const LEVELS: CefrLevel[] = ['A1', 'A2', 'B1', 'B2', 'C1']
 
@@ -27,12 +30,17 @@ const LEVEL_HINTS: Record<CefrLevel, string> = {
   C1: 'Avançado'
 }
 
+/** Idiomas das explicações: qualquer um que o aluno fale de verdade. */
+const NATIVE_CANDIDATES = ['pt-BR', 'en', 'es']
+
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): JSX.Element {
-  const [step, setStep] = useState<Step>('goal')
+export function OnboardingScreen({ settings, languages, onDone }: OnboardingScreenProps): JSX.Element {
+  const [step, setStep] = useState<Step>('language')
+  const [targetLang, setTargetLang] = useState('en')
+  const [nativeLang, setNativeLang] = useState('pt-BR')
   const [goal, setGoal] = useState('')
   const [manualLevel, setManualLevel] = useState<CefrLevel | null>(null)
   const [showManual, setShowManual] = useState(false)
@@ -44,13 +52,24 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
   const [error, setError] = useState<string | null>(null)
 
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
+  // Sem o registro carregado ainda (IPC em voo), o passo abre só com o padrão.
+  const targetOptions = languages.length > 0 ? languages : [{ code: 'en', nativeName: 'English', name: 'English', promptName: 'inglês', scriptDirection: 'ltr' as const, tokenization: 'space' as const }]
+  const lang = targetLabel(targetLang)
+
+  function pickTarget(option: LanguageOption): void {
+    setTargetLang(option.code)
+    // O nativo nunca pode ser o idioma que se está aprendendo.
+    if (nativeLang.split('-')[0] === option.code.split('-')[0]) {
+      setNativeLang('pt-BR')
+    }
+  }
 
   async function startTest(): Promise<void> {
     setBusy(true)
     setError(null)
 
     try {
-      const generated = await window.api.learning.placement.generate(goal)
+      const generated = await window.api.learning.placement.generate({ goal, targetLang, nativeLang })
       setTest(generated)
       setAnswers(new Array(generated.questions.length).fill(-1))
       setCurrent(0)
@@ -81,9 +100,10 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
     setBusy(true)
     setError(null)
 
-    const input: OnboardingInput = { goal: goal.trim(), cefr }
+    const input: OnboardingInput = { goal: goal.trim(), cefr, targetLang, nativeLang }
 
     try {
+      setTargetLanguage(targetLang)
       const state = await window.api.learning.profile.onboard(input)
       onDone(state)
     } catch (onboardError) {
@@ -129,26 +149,102 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
             </div>
           )}
 
+          {step === 'language' && (
+            <section className="rounded-2xl border border-line bg-panel p-6">
+              <h2 className="text-sm font-semibold">{t.languages.targetTitle}</h2>
+              <p className="mt-1 text-xs leading-relaxed text-muted">{t.languages.targetHelp}</p>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {targetOptions.map((option) => (
+                  <button
+                    key={option.code}
+                    type="button"
+                    onClick={() => pickTarget(option)}
+                    className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                      targetLang === option.code
+                        ? 'border-accent/60 bg-accent-soft text-accent'
+                        : 'border-line bg-panel-2 text-muted hover:text-ink'
+                    }`}
+                  >
+                    <span lang={option.code} dir="auto" className="font-medium">
+                      {languagePickerLabel(option)}
+                    </span>
+                    {(option.scriptDirection === 'rtl' || option.tokenization === 'cjk') && (
+                      <span className="ml-1.5 text-[10px] text-faint">
+                        {option.scriptDirection === 'rtl' ? '⇄' : 'CJK'}
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] leading-relaxed text-faint">
+                ⇄ {t.languages.rtlNote} · CJK {t.languages.cjkNote}
+              </p>
+
+              {targetLang !== 'en' && (
+                <p className="mt-3 rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] leading-relaxed text-warn">
+                  {t.languages.fixtureNote}
+                </p>
+              )}
+
+              <div className="mt-6">
+                <h3 className="text-xs font-semibold">{t.languages.nativeTitle}</h3>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted">{t.languages.nativeHelp}</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {NATIVE_CANDIDATES.filter((code) => code.split('-')[0] !== targetLang.split('-')[0]).map(
+                    (code) => (
+                      <button
+                        key={code}
+                        type="button"
+                        onClick={() => setNativeLang(code)}
+                        className={`rounded-lg border px-3 py-1.5 text-xs transition-colors ${
+                          nativeLang === code
+                            ? 'border-accent/60 bg-accent-soft text-accent'
+                            : 'border-line bg-panel-2 text-muted hover:text-ink'
+                        }`}
+                      >
+                        {t.languages.names[code as keyof typeof t.languages.names] ?? code}
+                      </button>
+                    )
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setStep('goal')}
+                  className="rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                >
+                  {t.onboarding.next}
+                </button>
+              </div>
+            </section>
+          )}
+
           {step === 'goal' && (
             <section className="rounded-2xl border border-line bg-panel p-6">
               <h2 className="text-sm font-semibold">{t.onboarding.stepGoal}</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted">{t.onboarding.goalHelp}</p>
 
               <div className="mt-4 flex flex-wrap gap-2">
-                {t.onboarding.goalSuggestions.map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    type="button"
-                    onClick={() => setGoal(suggestion)}
-                    className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
-                      goal === suggestion
-                        ? 'border-accent/60 bg-accent-soft text-accent'
-                        : 'border-line bg-panel-2 text-muted hover:text-ink'
-                    }`}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
+                {t.onboarding.goalSuggestions.map((suggestion) => {
+                  const label = suggestion.replace('{lang}', lang)
+                  return (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => setGoal(label)}
+                      className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                        goal === label
+                          ? 'border-accent/60 bg-accent-soft text-accent'
+                          : 'border-line bg-panel-2 text-muted hover:text-ink'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
               </div>
 
               <input
@@ -158,7 +254,14 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
                 className="mt-4 w-full rounded-lg border border-line bg-panel-2 px-3 py-2.5 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50"
               />
 
-              <div className="mt-6 flex justify-end">
+              <div className="mt-6 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setStep('language')}
+                  className="rounded-lg border border-line px-4 py-2 text-sm text-muted transition-colors hover:text-ink"
+                >
+                  {t.onboarding.back}
+                </button>
                 <button
                   type="button"
                   onClick={() => setStep('level')}
@@ -173,7 +276,7 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
 
           {step === 'level' && (
             <section className="rounded-2xl border border-line bg-panel p-6">
-              <h2 className="text-sm font-semibold">{t.onboarding.stepLevel}</h2>
+              <h2 className="text-sm font-semibold">{t.onboarding.stepLevel.replace('{lang}', lang)}</h2>
               <p className="mt-1 text-xs leading-relaxed text-muted">{t.onboarding.levelHelp}</p>
 
               {!model && (
@@ -264,7 +367,9 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
                 />
               </div>
 
-              <p className="mt-5 text-base leading-relaxed text-ink">{question.prompt}</p>
+              <p className="mt-5 text-base leading-relaxed text-ink" dir="auto" lang={targetLang}>
+                {question.prompt}
+              </p>
 
               <div className="mt-4 space-y-2">
                 {question.options.map((option, index) => {
@@ -293,7 +398,9 @@ export function OnboardingScreen({ settings, onDone }: OnboardingScreenProps): J
                       >
                         {String.fromCharCode(65 + index)}
                       </span>
-                      {option}
+                      <span dir="auto" lang={targetLang}>
+                        {option}
+                      </span>
                     </button>
                   )
                 })}

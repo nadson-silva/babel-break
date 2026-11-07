@@ -35,11 +35,12 @@ export const lessonContentSchema = z.object({
   level: cefrSchema,
   objective: z.string().min(2),
   explanation: z.string().min(10),
+  /** M4: pares "target" (idioma ensinado) / "native" (idioma do aluno), sem hardcode en/pt. */
   examples: z
     .array(
       z.object({
-        en: z.string().min(1),
-        pt: z.string().min(1)
+        target: z.string().min(1),
+        native: z.string().min(1)
       })
     )
     .min(2)

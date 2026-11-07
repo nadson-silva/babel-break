@@ -1,16 +1,17 @@
 /**
- * Caderno de erros (M2).
+ * Caderno de erros (M2) — par de idiomas no M4.
  *
- * Toda correção — de exercício, de chat com o tutor ou do banco PT-BR — cai
- * aqui, agregada por (tag, frase original) com contador de recorrência. É esta
- * tabela que faz a lição #2 ser diferente da #1.
+ * Toda correção — de exercício, de chat com o tutor ou do banco de
+ * interferência — cai aqui, agregada por (tag, frase original) com contador de
+ * recorrência. É esta tabela que faz a lição #2 ser diferente da #1.
  */
 import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import type { Correction, NotebookTag, NotebookView } from '../shared/types'
 import { errorFocus, type ErrorFocusEntry, type NotebookRow } from '../core/adapt'
 import { bankEntries } from '../core/interference'
 import type { ErrorHint } from '../core/prompts'
-import { getDb, schema } from './db'
+import { getDefaultProfile, getDb, schema } from './db'
+import { profileInterferenceRules } from './locale'
 
 type ErrorRow = typeof schema.errors.$inferSelect
 
@@ -24,7 +25,8 @@ export function normalizeTag(tag: string): string {
 }
 
 function compact(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+  // Unicode-aware (M4): dedupe de erros em qualquer escrita.
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 }
 
 /**
@@ -124,7 +126,7 @@ export function openErrors(profileId: number, limit = 40): ErrorRow[] {
     .all()
 }
 
-/** Foco de adaptação: caderno do aluno, ancorado no banco PT-BR quando fino. */
+/** Foco de adaptação: caderno do aluno, ancorado no banco do par quando fino. */
 export function focusFor(profileId: number, limit = 5): ErrorFocusEntry[] {
   const db = getDb()
   const rows = db
@@ -135,7 +137,8 @@ export function focusFor(profileId: number, limit = 5): ErrorFocusEntry[] {
     .limit(60)
     .all()
 
-  return errorFocus(rowsToNotebookRows(rows), limit)
+  const anchor = bankEntries(profileInterferenceRules())
+  return errorFocus(rowsToNotebookRows(rows), limit, anchor)
 }
 
 /** Hints prontos para ir dentro dos prompts de geração. */
@@ -200,12 +203,20 @@ export function notebookView(profileId: number): NotebookView {
     .where(and(eq(schema.errors.profileId, profileId), eq(schema.errors.source, 'bank')))
     .get()?.value ?? 0
 
+  const bankRules = profileInterferenceRules()
+  const profile = getDefaultProfile()
+  const bankPair =
+    bankRules.length > 0
+      ? { native: profile.nativeLang, target: profile.targetLang }
+      : null
+
   return {
     tags,
     openCount: rows.filter((row) => row.resolvedAt === null).length,
     resolvedCount: rows.filter((row) => row.resolvedAt !== null).length,
-    bank: bankEntries(),
-    bankHits: Number(bankHits)
+    bank: bankEntries(bankRules),
+    bankHits: Number(bankHits),
+    bankPair
   }
 }
 

@@ -1,7 +1,37 @@
 export const ptBR = {
   app: {
     name: 'Language Teacher',
-    tagline: 'Inglês para brasileiros, no seu ritmo'
+    tagline: 'Tutor de idiomas, no seu ritmo'
+  },
+  languages: {
+    targetTitle: 'Qual idioma você quer aprender?',
+    targetHelp:
+      'O app ensina qualquer idioma via IA. Inglês tem conteúdo extra gerado offline.',
+    nativeTitle: 'Idioma das explicações',
+    nativeHelp: 'Seu idioma — usado nas explicações, no feedback e nas lições.',
+    rtlNote: 'escrita da direita para a esquerda',
+    cjkNote: 'sem espaços entre palavras',
+    fixtureNote:
+      'O gerador offline é calibrado para inglês. Para os demais idiomas, configure um provedor de IA em Configurações.',
+    names: {
+      en: 'inglês',
+      es: 'espanhol',
+      fr: 'francês',
+      de: 'alemão',
+      it: 'italiano',
+      nl: 'neerlandês',
+      sv: 'sueco',
+      ru: 'russo',
+      pl: 'polonês',
+      tr: 'turco',
+      ar: 'árabe',
+      he: 'hebraico',
+      fa: 'persa',
+      ja: 'japonês',
+      ko: 'coreano',
+      zh: 'chinês',
+      'pt-BR': 'português do Brasil'
+    }
   },
   nav: {
     home: 'Início',
@@ -35,7 +65,7 @@ export const ptBR = {
   tutor: {
     title: 'Conversar com o tutor',
     subtitle: 'Ele corrige suas frases e lembra dos seus erros recorrentes.',
-    placeholder: 'Escreva em inglês…  (Enter envia, Shift+Enter quebra linha)',
+    placeholder: 'Escreva em {lang}…  (Enter envia, Shift+Enter quebra linha)',
     send: 'Enviar',
     stop: 'Parar',
     you: 'Você',
@@ -104,10 +134,12 @@ export const ptBR = {
     fromExercise: 'exercício',
     fromChat: 'conversa',
     fromLocal: 'correção local',
-    fromBank: 'banco PT-BR',
-    bankTitle: 'Banco de interferência PT-BR',
+    fromBank: 'banco {pair}',
+    bankTitle: 'Banco de interferência {pair}',
     bankHelp:
-      'Erros típicos de quem fala português. Eles guiam correções, exercícios e o conteúdo gerado por IA.',
+      'Erros típicos de quem fala {native}. Eles guiam correções, exercícios e o conteúdo gerado por IA.',
+    bankEmpty:
+      'Sem banco manual para este par de idiomas: a correção de língua é feita pela IA, e o caderno continua funcionando igual.',
     bankHits: '{count} correções vieram do banco, sem gastar tokens.',
     tagCount: '{count} erros registrados'
   },
@@ -142,6 +174,8 @@ export const ptBR = {
   onboarding: {
     title: 'Vamos configurar seu tutor',
     subtitle: 'Três passos rápidos. Você pode mudar tudo depois em Configurações.',
+    stepLanguage: 'Escolha os idiomas',
+    languageNext: 'Escolher idioma',
     stepGoal: 'Qual é o seu objetivo?',
     goalHelp: 'Isso orienta o vocabulário e as situações das lições. A gramática segue o seu nível.',
     goalPlaceholder: 'Ex.: entrevista para desenvolvedor backend',
@@ -149,10 +183,10 @@ export const ptBR = {
       'Conversação do dia a dia',
       'Entrevista para dev',
       'Viagem',
-      'Inglês para o trabalho',
+      '{lang} para o trabalho',
       'Preparação para IELTS'
     ],
-    stepLevel: 'Qual é o seu nível de inglês?',
+    stepLevel: 'Qual é o seu nível de {lang}?',
     levelHelp:
       'Se não souber, faça um teste rápido de 10 questões. O resultado é uma estimativa, não uma nota.',
     takeTest: 'Fazer teste rápido',
@@ -302,7 +336,12 @@ export const ptBR = {
     examples: 'Exemplos',
     grammar: 'Pontos de gramática',
     vocabulary: 'Vocabulário',
-    pitfalls: 'Armadilhas para quem fala português',
+    pitfalls: 'Armadilhas para quem fala {native}',
+    typeMultipleChoice: 'Múltipla escolha',
+    typeCloze: 'Complete a frase',
+    typeTranslate: 'Traduza para o {lang}',
+    typeOrder: 'Ordene a frase',
+    typeFreeProduction: 'Produção livre',
     focusTitle: 'Esta lição mira seus erros',
     focusTag: 'treina: {tags}',
     practiceCta: 'Praticar',
@@ -318,7 +357,7 @@ export const ptBR = {
     yourAnswer: 'Sua resposta',
     orderHint: 'Toque nas palavras para montar a frase.',
     clear: 'Limpar',
-    answerPlaceholder: 'Escreva sua resposta em inglês…',
+    answerPlaceholder: 'Escreva sua resposta em {lang}…',
     summaryTitle: 'Lição concluída',
     summaryBody: 'Você acertou {correct} de {total}. O resultado já foi salvo no seu progresso.',
     summaryCards: '{count} cards foram para a sua fila de revisão.',
@@ -334,7 +373,14 @@ export const ptBR = {
   },
   settings: {
     title: 'Configurações',
-    subtitle: 'Provedor de IA, modelos, correção e armazenamento local.',
+    subtitle: 'Provedor de IA, modelos, correção, idiomas e armazenamento local.',
+    uiLangTitle: 'Idioma da interface',
+    uiLangHelp: 'Troca os textos do app na hora. As lições continuam no idioma do seu perfil.',
+    languagesTitle: 'Idiomas do perfil',
+    languagesHelp:
+      'Definidos no primeiro onboarding: o idioma ensinado governa o conteúdo, o outro as explicações.',
+    targetLabel: 'Idioma ensinado',
+    nativeLabel: 'Explicações em',
     providerTitle: 'Provedor de IA',
     providerHelp:
       'Ollama roda localmente e não custa nada. Gemini usa a nuvem e precisa de uma chave de API.',
@@ -380,6 +426,5 @@ export const ptBR = {
     modelsError: 'Não foi possível listar os modelos. Você ainda pode digitar o identificador.',
     saveFirst: 'Salve as alterações antes de testar.'
   }
-} as const
+}
 
-export const t = ptBR

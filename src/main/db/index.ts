@@ -4,6 +4,7 @@ import path from 'node:path'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
+import { languageSeedRows } from '../../core/languages'
 import * as schema from './schema'
 
 let sqlite: Database.Database | null = null
@@ -13,6 +14,29 @@ function migrationsFolder(): string {
   return app.isPackaged
     ? path.join(process.resourcesPath, 'drizzle')
     : path.join(app.getAppPath(), 'drizzle')
+}
+
+/**
+ * M4: o registro de idiomas de `core/languages.ts` é a fonte da verdade; a
+ * tabela `languages` é a projeção consultável no SQLite (direção de escrita,
+ * tokenização, notas de prompt). Idempotente — roda em toda inicialização.
+ */
+function seedLanguages(database: BetterSQLite3Database<typeof schema>): void {
+  for (const row of languageSeedRows()) {
+    database
+      .insert(schema.languages)
+      .values(row)
+      .onConflictDoUpdate({
+        target: schema.languages.code,
+        set: {
+          name: row.name,
+          scriptDirection: row.scriptDirection,
+          tokenization: row.tokenization,
+          promptNotes: row.promptNotes
+        }
+      })
+      .run()
+  }
 }
 
 export function initDatabase(): BetterSQLite3Database<typeof schema> {
@@ -28,6 +52,7 @@ export function initDatabase(): BetterSQLite3Database<typeof schema> {
 
   db = drizzle(sqlite, { schema })
   migrate(db, { migrationsFolder: migrationsFolder() })
+  seedLanguages(db)
 
   return db
 }

@@ -9,6 +9,7 @@ import type {
   GuidedSession,
   GuidedStep,
   HomeState,
+  LanguageOption,
   LessonDetail,
   LessonResultView,
   ModelInfo,
@@ -41,6 +42,10 @@ declare global {
         update(patch: Partial<AppSettings>): Promise<SettingsPayload>
         setGeminiKey(key: string): Promise<SettingsPayload>
         clearGeminiKey(): Promise<SettingsPayload>
+      }
+      /** M4: registro de idiomas para os seletores do onboarding/configurações. */
+      languages: {
+        list(): Promise<LanguageOption[]>
       }
       models: {
         list(provider: ProviderId): Promise<ModelInfo[]>
@@ -84,7 +89,9 @@ declare global {
           onboard(input: OnboardingInput): Promise<ProfileState>
         }
         placement: {
-          generate(goal?: string): Promise<PlacementTest>
+          generate(
+            input?: string | { goal?: string; targetLang?: string; nativeLang?: string }
+          ): Promise<PlacementTest>
           submit(answers: number[]): Promise<PlacementResult>
         }
         curriculum: {

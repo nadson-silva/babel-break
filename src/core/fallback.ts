@@ -1,7 +1,18 @@
 import type { CefrLevel } from '../shared/types'
 import type { ErrorFocusEntry } from './adapt'
+import { DEFAULT_LOCALE, type PromptLocale } from './prompts'
+import { tokenize } from './languages'
 import { bankEntries } from './interference'
 import type { CurriculumOutput, ExerciseSetOutput, GeneratedExercise, LessonContentOutput } from './schemas'
+
+/**
+ * Gerador determinístico offline (M2/M4).
+ *
+ * O inglês é o *fixture de qualidade* do plano: estas frases escritas à mão só
+ * existem para o idioma-alvo inglês. Para qualquer outro idioma o chamador
+ * verifica `deterministicContentSupported` e degrada com erro claro em vez de
+ * inventar conteúdo — conteúdo sem IA em idioma desconhecido seria lixo.
+ */
 
 interface FallbackLesson {
   title: string
@@ -140,9 +151,9 @@ export function fallbackLessonContent(input: {
   vocabulary?: { term: string; translation: string; example: string }[]
 }): LessonContentOutput {
   const exampleSet = [
-    { en: 'I study English every day.', pt: 'Eu estudo inglês todos os dias.' },
-    { en: 'She works from home on Mondays.', pt: 'Ela trabalha de casa às segundas.' },
-    { en: 'They like to practice together.', pt: 'Eles gostam de praticar juntos.' }
+    { target: 'I study English every day.', native: 'Eu estudo inglês todos os dias.' },
+    { target: 'She works from home on Mondays.', native: 'Ela trabalha de casa às segundas.' },
+    { target: 'They like to practice together.', native: 'Eles gostam de praticar juntos.' }
   ]
 
   const focus = input.errors ?? []
@@ -163,7 +174,7 @@ export function fallbackLessonContent(input: {
       {
         title: input.title,
         explanation: input.objective,
-        examples: exampleSet.map((example) => example.en)
+        examples: exampleSet.map((example) => example.target)
       }
     ],
     pitfalls: focus.length > 0 ? pitfallsFrom(focus) : pitfallsFrom(bankEntries().slice(0, 2).map(toBankFocus)),
@@ -182,8 +193,9 @@ export function fallbackLessonContent(input: {
 }
 
 /**
- * Armadilhas PT-BR para o conteúdo local. Vêm do caderno do aluno quando ele
- * existe; senão do banco de interferência (o app nunca gera lição genérica).
+ * Armadilhas do idioma do aluno para o conteúdo local. Vêm do caderno dele
+ * quando existe; senão do banco de interferência do par (o app nunca gera
+ * lição genérica quando há banco manual disponível).
  */
 export function pitfallsFrom(entries: ErrorFocusEntry[]): LessonContentOutput['pitfalls'] {
   return entries
@@ -223,6 +235,11 @@ function shuffle<T>(items: T[]): T[] {
   return copy
 }
 
+/** Tokens de "ordene a frase" respeitando a escrita do idioma-alvo (M4). */
+function tokenizeFor(sentence: string, targetCode: string): string[] {
+  return tokenize(sentence, targetCode)
+}
+
 function missingWord(sentence: string): { prompt: string; answer: string } {
   const words = sentence.replace(/[.!?]+$/, '').split(/\s+/).filter(Boolean)
   if (words.length < 2) return { prompt: sentence, answer: words[0] ?? sentence }
@@ -233,14 +250,14 @@ function missingWord(sentence: string): { prompt: string; answer: string } {
 }
 
 /** Reconstruir a frase certa é o drill determinístico do erro recorrente. */
-function orderFromFocus(entry: ErrorFocusEntry): GeneratedExercise {
+function orderFromFocus(entry: ErrorFocusEntry, locale: PromptLocale): GeneratedExercise {
   const sentence = entry.corrected.replace(/^["“]|["”]$/g, '').trim()
-  const tokens = sentence.split(/\s+/).filter(Boolean)
+  const tokens = tokenizeFor(sentence, locale.target.code)
 
   return {
     type: 'order',
     instruction: `Reconstrua a frase correta (área: ${entry.tag}).`,
-    prompt: entry.note ?? 'Monte a frase correta em inglês.',
+    prompt: entry.note ?? `Monte a frase correta em ${locale.targetName}.`,
     options: [],
     tokens,
     answer: sentence,
@@ -251,14 +268,14 @@ function orderFromFocus(entry: ErrorFocusEntry): GeneratedExercise {
 }
 
 /** Reconhecer o erro entre duas frases vem antes de parar de cometê-lo. */
-function spotError(entry: ErrorFocusEntry): GeneratedExercise {
+function spotError(entry: ErrorFocusEntry, locale: PromptLocale): GeneratedExercise {
   const other = bankEntries().filter((item) => item.tag !== entry.tag).slice(0, 2)
   const options = [...new Set([entry.corrected, entry.original, ...other.map((item) => item.right)])].slice(0, 4)
 
   return {
     type: 'multiple_choice',
     instruction: 'Escolha a frase correta.',
-    prompt: `Qual destas frases está certa em inglês? (área: ${entry.tag})`,
+    prompt: `Qual destas frases está certa em ${locale.targetName}? (área: ${entry.tag})`,
     options: shuffle(options),
     tokens: [],
     answer: entry.corrected,
@@ -268,13 +285,17 @@ function spotError(entry: ErrorFocusEntry): GeneratedExercise {
   }
 }
 
-export function fallbackExercises(content: LessonContentOutput, errors: ErrorFocusEntry[] = []): ExerciseSetOutput {
+export function fallbackExercises(
+  content: LessonContentOutput,
+  errors: ErrorFocusEntry[] = [],
+  locale: PromptLocale = DEFAULT_LOCALE
+): ExerciseSetOutput {
   const vocab = content.vocabulary.slice(0, 4)
   const focus = focusEntries(errors)
   const first = content.examples[0]
   const second = content.examples[1] ?? content.examples[0]
-  const cloze = missingWord(first.en)
-  const orderTokens = second.en.split(/\s+/).filter(Boolean)
+  const cloze = missingWord(first.target)
+  const orderTokens = tokenizeFor(second.target, locale.target.code)
 
   const optionsA = shuffle([...new Set(vocab.map((item) => item.translation))])
   const optionsB = shuffle([...new Set([vocab[1].translation, vocab[0].translation, vocab[2].translation, vocab[3].translation])])
@@ -308,39 +329,39 @@ export function fallbackExercises(content: LessonContentOutput, errors: ErrorFoc
       prompt: 'Monte a frase correta.',
       options: [],
       tokens: orderTokens,
-      answer: second.en,
+      answer: second.target,
       alternatives: [],
       explanation: 'Observe a ordem sujeito + verbo + complemento.',
       targetTags: []
     },
     {
       type: 'translate',
-      instruction: 'Traduza a frase para o inglês.',
-      prompt: second.pt,
+      instruction: `Traduza a frase para o ${locale.targetName}.`,
+      prompt: second.native,
       options: [],
       tokens: [],
-      answer: second.en,
+      answer: second.target,
       alternatives: [],
-      explanation: 'Compare sua tradução com a versão em inglês.',
+      explanation: `Compare sua tradução com a versão em ${locale.targetName}.`,
       targetTags: focus[0] ? [focus[0].tag] : []
     },
     {
       type: 'free_production',
-      instruction: 'Escreva uma resposta curta usando o conteúdo da lição.',
+      instruction: `Escreva uma resposta curta usando o conteúdo da lição.`,
       prompt: `Escreva 2 frases sobre: ${content.objective}`,
       options: [],
       tokens: [],
-      answer: `${first.en} ${second.en}`,
+      answer: `${first.target} ${second.target}`,
       alternatives: [],
-      explanation: 'Use o vocabulário e a estrutura que você praticou.',
+      explanation: `Use o vocabulário e a estrutura que você praticou em ${locale.targetName}.`,
       targetTags: focus[1] ? [focus[1].tag] : []
     }
   ]
 
   // Os dois últimos exercícios miram o caderno de erros: é a adaptação visível
   // entre a lição #1 e a lição #2, mesmo sem IA disponível.
-  if (focus[0]) exercises.push(orderFromFocus(focus[0]))
-  if (focus[1]) exercises.push(spotError(focus[1]))
+  if (focus[0]) exercises.push(orderFromFocus(focus[0], locale))
+  if (focus[1]) exercises.push(spotError(focus[1], locale))
   else {
     exercises.push({
       type: 'multiple_choice',

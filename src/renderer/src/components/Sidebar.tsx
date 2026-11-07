@@ -1,6 +1,6 @@
 import type { JSX } from 'react'
 import type { SettingsPayload } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 
 export type View = 'home' | 'lessons' | 'tracks' | 'tutor' | 'review' | 'notebook' | 'settings'
 

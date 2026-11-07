@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { CardView, LessonDetail, LessonResultView, ReviewRating } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { nativeLabel } from '../lang'
 import { ExercisePlayer } from '../components/ExercisePlayer'
 import { ReviewQueue } from '../components/ReviewQueue'
+import { TargetText } from '../components/TargetText'
 
 interface LessonScreenProps {
   lessonId: number
@@ -256,9 +258,9 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
                 <h2 className="text-sm font-semibold">{t.player.examples}</h2>
                 <ul className="mt-3 space-y-3">
                   {content.examples.map((example, exampleIndex) => (
-                    <li key={`${example.en}-${exampleIndex}`} className="rounded-xl bg-panel-2 px-4 py-3">
-                      <div className="text-sm text-ink">{example.en}</div>
-                      <div className="mt-1 text-xs text-muted">{example.pt}</div>
+                    <li key={`${example.target}-${exampleIndex}`} className="rounded-xl bg-panel-2 px-4 py-3">
+                      <TargetText className="block text-sm text-ink">{example.target}</TargetText>
+                      <div className="mt-1 text-xs text-muted">{example.native}</div>
                     </li>
                   ))}
                 </ul>
@@ -274,7 +276,7 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
                       <ul className="mt-2 space-y-1">
                         {point.examples.map((example, exampleIndex) => (
                           <li key={`${example}-${exampleIndex}`} className="text-sm text-ink">
-                            · {example}
+                            · <TargetText>{example}</TargetText>
                           </li>
                         ))}
                       </ul>
@@ -285,14 +287,14 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
 
               {content.pitfalls && content.pitfalls.length > 0 && (
                 <section className="rounded-2xl border border-warn/30 bg-panel p-6">
-                  <h2 className="text-sm font-semibold">{t.player.pitfalls}</h2>
+                  <h2 className="text-sm font-semibold">{t.player.pitfalls.replace('{native}', nativeLabel())}</h2>
                   <div className="mt-3 space-y-3">
                     {content.pitfalls.map((pitfall, index) => (
                       <div key={`${pitfall.tag}-${index}`} className="rounded-xl bg-panel-2 px-4 py-3">
                         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-                          <span className="text-danger/90 line-through decoration-danger/40">{pitfall.wrong}</span>
+                          <TargetText className="text-danger/90 line-through decoration-danger/40">{pitfall.wrong}</TargetText>
                           <span className="text-faint">→</span>
-                          <span className="font-medium text-accent">{pitfall.right}</span>
+                          <TargetText className="font-medium text-accent">{pitfall.right}</TargetText>
                           <span className="rounded-full bg-panel px-2 py-0.5 text-[10px] text-faint">
                             {pitfall.tag}
                           </span>
@@ -313,10 +315,10 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
                       className="flex flex-col gap-1 py-2.5 sm:flex-row sm:items-baseline sm:justify-between"
                     >
                       <div>
-                        <span className="text-sm font-medium text-ink">{item.term}</span>
+                        <TargetText className="text-sm font-medium text-ink">{item.term}</TargetText>
                         <span className="ml-2 text-xs text-muted">{item.translation}</span>
                       </div>
-                      <span className="text-xs italic text-faint">{item.example}</span>
+                      <TargetText className="text-xs italic text-faint">{item.example}</TargetText>
                     </div>
                   ))}
                 </div>

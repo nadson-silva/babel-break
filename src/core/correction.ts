@@ -1,5 +1,11 @@
 import type { Correction, CorrectionSource, CorrectionStyle } from '../shared/types'
-import { detectInterference, recast as applyBankRecast } from './interference'
+import {
+  detectInterference,
+  INTERFERENCE_BANK,
+  recast as applyBankRecast,
+  type InterferenceRule
+} from './interference'
+import { DEFAULT_LOCALE, type PromptLocale } from './prompts'
 
 export type { Correction, CorrectionSource }
 
@@ -25,12 +31,19 @@ export function normalizeCorrectionTag(tag: string): string {
 }
 
 function compact(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]/g, '')
+  // Unicode-aware (M4): com [^a-z0-9] todo texto CJK/árabe virava '' e as
+  // checagens "mudou alguma coisa?" / "já coberto?" igualavam tudo.
+  return value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 }
 
-/** Passada determinística com o banco de interferência PT-BR (funciona offline). */
-export function bankCorrections(text: string): Correction[] {
-  return detectInterference(text).map((hit) => ({
+/**
+ * Passada determinística com o banco de interferência. `rules` são as regras do
+ * par nativo→alvo (`interferenceRulesFor`); sem banco para o par, passe `[]` e
+ * a correção fica inteira com a IA — essa é a abstração do M4 (banco manual vs.
+ * IA). O default histórico é o banco PT-BR→inglês (fixture de qualidade).
+ */
+export function bankCorrections(text: string, rules: InterferenceRule[] = INTERFERENCE_BANK): Correction[] {
+  return detectInterference(text, rules).map((hit) => ({
     original: hit.original,
     corrected: hit.corrected,
     tag: normalizeTag(hit.tag),
@@ -73,9 +86,13 @@ export function mergeCorrections(bank: Correction[], model: Correction[]): Corre
   return merged.slice(0, 6)
 }
 
-export function buildCorrectionReport(text: string, model: Correction[] = []): CorrectionReport {
-  const corrections = mergeCorrections(bankCorrections(text), model)
-  const deterministic = applyBankRecast(text)
+export function buildCorrectionReport(
+  text: string,
+  model: Correction[] = [],
+  rules: InterferenceRule[] = INTERFERENCE_BANK
+): CorrectionReport {
+  const corrections = mergeCorrections(bankCorrections(text, rules), model)
+  const deterministic = applyBankRecast(text, rules)
   const recastText = corrections.length > 0 ? deterministic : text.trim()
 
   return {
@@ -94,13 +111,13 @@ export function tagsOf(corrections: Correction[]): string[] {
   return tags
 }
 
-/** Política de correção do usuário, aplicada no prompt (não na UI). */
-export function correctionPolicyPrompt(style: CorrectionStyle): string {
+/** Política de correção do usuário, aplicada no prompt (não da UI). M4: na língua nativa do perfil. */
+export function correctionPolicyPrompt(style: CorrectionStyle, locale: PromptLocale = DEFAULT_LOCALE): string {
   if (style === 'recast') {
     return [
       'Política de correção: RECAST SUAVE.',
       'Não faça lista de erros nem use tom de professor. Refaça naturalmente a frase do aluno',
-      'dentro da sua resposta, destacando apenas a versão corrigida em itálico simples (*...*).',
+      `dentro da sua resposta, em ${locale.targetName}, destacando apenas a versão corrigida em itálico simples (*...*).`,
       'Se não houver erro de língua, converse sem corrigir.'
     ].join(' ')
   }
@@ -108,14 +125,14 @@ export function correctionPolicyPrompt(style: CorrectionStyle): string {
   if (style === 'explicit') {
     return [
       'Política de correção: EXPLICAÇÃO EXPLÍCITA.',
-      'Aponte o erro, dê a forma correta e explique em português do Brasil em 1 frase curta.',
+      `Aponte o erro, dê a forma correta e explique em ${locale.nativeName} em 1 frase curta.`,
       'No máximo 3 correções por resposta, priorizando o ponto que o aluno mais repete.'
     ].join(' ')
   }
 
   return [
     'Política de correção: AMBOS.',
-    'Primeiro refaça a frase do aluno naturalmente (recast) e depois, em uma linha curta em',
-    'português, explique o principal erro. No máximo 3 correções por resposta.'
+    `Primeiro refaça a frase do aluno naturalmente em ${locale.targetName} (recast) e depois, em uma linha curta em`,
+    `${locale.nativeName}, explique o principal erro. No máximo 3 correções por resposta.`
   ].join(' ')
 }

@@ -7,7 +7,7 @@ import type {
   TrackPlanLesson,
   TracksView
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 
 interface TracksScreenProps {
   settings: SettingsPayload

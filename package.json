@@ -2,7 +2,7 @@
   "name": "language-teacher",
   "productName": "Language Teacher",
   "version": "0.1.0",
-  "description": "Tutor de idiomas local-first com IA (inglês para brasileiros)",
+  "description": "Tutor de idiomas local-first com IA (qualquer idioma, interface PT-BR/EN)",
   "main": "./out/main/index.js",
   "author": "nadson",
   "license": "MIT",

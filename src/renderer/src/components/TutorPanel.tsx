@@ -8,7 +8,8 @@ import type {
   ScenarioFeedbackView,
   ScenarioView
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { targetLabel, targetLanguage } from '../lang'
 import { CorrectionList } from './CorrectionList'
 import { ScenarioBanner, ScenarioFeedbackPanel } from './ScenarioPanel'
 
@@ -279,7 +280,7 @@ export function TutorPanel({
             <h2 className="text-base font-semibold">{t.tutor.emptyTitle}</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted">{t.tutor.emptyBody}</p>
             <div className="mt-5 flex w-full flex-col gap-2">
-              {t.tutor.suggestions.map((suggestion) => (
+              {(targetLanguage().split('-')[0] === 'en' ? t.tutor.suggestions : []).map((suggestion) => (
                 <button
                   key={suggestion}
                   type="button"
@@ -314,7 +315,10 @@ export function TutorPanel({
                   >
                     {message.role === 'user' ? t.tutor.you : t.tutor.tutor}
                   </div>
-                  {message.content || (message.pending ? (status ? t.tutor[statusKey(status)] : t.tutor.thinking) : '')}
+                  <span dir="auto" lang={targetLanguage()}>
+                    {message.content ||
+                      (message.pending ? (status ? t.tutor[statusKey(status)] : t.tutor.thinking) : '')}
+                  </span>
                   {message.pending && (
                     <span className="ml-1 inline-block h-3.5 w-1.5 animate-pulse rounded-sm bg-accent align-middle" />
                   )}
@@ -364,7 +368,9 @@ export function TutorPanel({
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
             rows={variant === 'compact' ? 2 : 3}
-            placeholder={t.tutor.placeholder}
+            placeholder={t.tutor.placeholder.replace('{lang}', targetLabel())}
+            dir="auto"
+            lang={targetLanguage()}
             className="max-h-40 min-h-[52px] flex-1 resize-none rounded-xl border border-line bg-panel px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-faint focus:border-accent/50"
           />
           <div className="flex shrink-0 flex-col gap-2">

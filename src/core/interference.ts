@@ -1,14 +1,18 @@
 /**
- * Banco de interferência PT-BR → inglês.
+ * Bancos de interferência — o "por quê" de cada par nativo→alvo.
  *
- * Erros que falantes de português brasileiro cometem *por transferência* do
- * nativo, não por falta de vocabulário. O banco tem dois usos:
+ * Erros que o falante comete *por transferência* do nativo, não por falta de
+ * vocabulário. Cada banco tem dois usos:
  *
  * 1. Correção determinística (funciona offline, sem IA): `detectInterference`
  *    encontra o padrão e `recast` devolve a frase corrigida.
- * 2. Âncora de qualidade: os pares erradо→certo viram fixtures para prompts
+ * 2. Âncora de qualidade: os pares errado→certo viram fixtures para prompts
  *    (`exercise_gen`, `tutor_turn`) e para o harness de avaliação, para que as
  *    correções mirem erros reais e não genéricos.
+ *
+ * Desde o M4 o banco é uma *implementação* escolhida por par
+ * (`interferenceRulesFor`); a default das funções é PT-BR→inglês (§8 do plano),
+ * e pares sem banco são corrigidos 100% pela IA.
  *
  * Regras com `to` reescrevem a frase; regras sem `to` são `advisory`:
  * apontam o problema e a forma correta, mas quem decide a reescrita é o modelo
@@ -446,7 +450,167 @@ export const INTERFERENCE_BANK: InterferenceRule[] = [
   }
 ]
 
+/**
+ * Banco de interferência PT-BR → espanhol.
+ *
+ * Propositalmente menor que o de inglês: é o fixture que prova a abstração do
+ * M4 — a mesma máquina (detect/recast/âncora de prompt) funcionando para outro
+ * par, escrita à mão com erros reais de quem fala português. Para pares sem
+ * banco próprio a correção é 100% por IA (ver `core/correction.ts`).
+ */
+export const PT_ES_INTERFERENCE_BANK: InterferenceRule[] = [
+  {
+    id: 'em-para-en',
+    tag: 'prepositions',
+    find: /\bem\b/gi,
+    to: () => 'en',
+    wrong: 'Estoy em casa con mi familia.',
+    right: 'Estoy en casa con mi familia.',
+    note: 'O "em" do português não existe em espanhol: é "en".'
+  },
+  {
+    id: 'eu-para-yo',
+    tag: 'subject-pronoun',
+    find: /\beu\s+(soy|hablo|trabajo|vivo|estudio|quiero|tengo)\b/gi,
+    to: (match) => `yo ${match[1]}`,
+    wrong: 'Eu trabajo con equipos remotos.',
+    right: 'Yo trabajo con equipos remotos.',
+    note: 'Em espanhol o pronome de 1ª pessoa é "yo", não o "eu" português.'
+  },
+  {
+    id: 'muito-para-mucho',
+    tag: 'vocabulary',
+    find: /\bmuit([oa]s?)\b/gi,
+    to: (match) => `much${match[1]}`,
+    wrong: 'Tengo muito trabajo esta semana.',
+    right: 'Tengo mucho trabajo esta semana.',
+    note: '"Muito" é português; em espanhol é mucho/mucha/muchos/muchas.'
+  },
+  {
+    id: 'nao-para-no',
+    tag: 'vocabulary',
+    find: /\bnão\b/gi,
+    to: () => 'no',
+    wrong: 'Não entiendo la pregunta.',
+    right: 'No entiendo la pregunta.',
+    note: 'Negativa em espanhol: "no" (sem o "ã" português).'
+  },
+  {
+    id: 'tambem-para-tambien',
+    tag: 'accents',
+    find: /\btambém\b/gi,
+    to: () => 'también',
+    wrong: 'Yo também quiero practicar.',
+    right: 'Yo también quiero practicar.',
+    note: 'Acento agudo, não circunflexo: "también".'
+  },
+  {
+    id: 'ano-para-anio',
+    tag: 'false-cognate',
+    find: /\b(?:el|este)\s+ano\b/gi,
+    to: (match) => `${match[1]} año`,
+    wrong: 'El ano pasado viajé mucho.',
+    right: 'El año pasado viajé mucho.',
+    note: '"Ano" em espanhol é outra coisa; "ano/anos" (tempo) é año/años, com ñ.'
+  },
+  {
+    id: 'ter-que-para-tener-que',
+    tag: 'verb-pattern',
+    find: /\bter\s+que\b/gi,
+    to: () => 'tener que',
+    wrong: 'Yo ter que terminar el informe.',
+    right: 'Tengo que terminar el informe.',
+    note: 'Expressar obrigação em espanhol: "tener que" + infinitivo.'
+  },
+  {
+    id: 'tem-para-hay',
+    tag: 'existential-hay',
+    find: /\btem\s+(un|una|unos|unas|mucho|muchos|mucha|muchas)\b/gi,
+    to: (match) => `hay ${match[1]}`,
+    wrong: 'Tem muchos problemas de rendimiento.',
+    right: 'Hay muchos problemas de rendimiento.',
+    note: 'O "tem" existencial do português ("há") traduz-se por "hay".'
+  },
+  {
+    id: 'sonho-em-sonar-con',
+    tag: 'verb-preposition',
+    find: /\b(?:suenho|sonho|sueño)\s+em\b/gi,
+    to: () => 'sueño con',
+    wrong: 'Yo sonho em trabajar abroad.',
+    right: 'Sueño con trabajar en el extranjero.',
+    note: 'Soñar exige "con" em espanhol (do português "sonhar em").'
+  },
+  {
+    id: 'esperar-por',
+    tag: 'verb-preposition',
+    find: /\besper(o|amos|an)\s+por\b/gi,
+    to: (match) => `esper${match[1]} a`,
+    wrong: 'Espero por tu respuesta.',
+    right: 'Espero a tu respuesta.',
+    note: 'Esperar (aguardar) rege "a" em espanhol, não "por".'
+  },
+  {
+    id: 'embarazada',
+    tag: 'false-cognate',
+    // Advisory: a reescrita depende da intenção (avergonzada vs. emocionada).
+    find: /\bestoy?\s+embarazada\b/gi,
+    wrong: 'Estoy embarazada de hablar en público.',
+    right: 'Estoy avergonzada de hablar en público.',
+    note: 'Falso cognato clássico: embarazada = grávida; "embaraçada" é avergonzada.'
+  }
+]
+
+/**
+ * M4: o banco é uma **implementação de correção** por par de idiomas, não um
+ * singleton. Pares sem banco registrado caem na correção por IA — a interface
+ * `CorrectionEngine` em `core/correction.ts` decide o que usar.
+ */
+export interface InterferenceBankDef {
+  id: string
+  nativeLang: string
+  targetLang: string
+  rules: InterferenceRule[]
+}
+
+export const INTERFERENCE_BANKS: InterferenceBankDef[] = [
+  { id: 'pt-BR:en', nativeLang: 'pt-BR', targetLang: 'en', rules: INTERFERENCE_BANK },
+  { id: 'pt-BR:es', nativeLang: 'pt-BR', targetLang: 'es', rules: PT_ES_INTERFERENCE_BANK }
+]
+
+function baseLang(code: string): string {
+  return code.toLowerCase().split('-')[0]
+}
+
+/** Regras do banco manual para o par nativo→alvo; [] = sem banco (só IA). */
+export function interferenceRulesFor(
+  targetLang: string | null | undefined,
+  nativeLang: string | null | undefined
+): InterferenceRule[] {
+  const target = baseLang(targetLang ?? '')
+  const native = baseLang(nativeLang ?? '')
+  if (!target || !native) return []
+
+  const exact = INTERFERENCE_BANKS.find(
+    (bank) => bank.targetLang.toLowerCase() === targetLang?.toLowerCase() && bank.nativeLang.toLowerCase() === native
+  )
+  if (exact) return exact.rules
+
+  const loose = INTERFERENCE_BANKS.find(
+    (bank) => baseLang(bank.targetLang) === target && baseLang(bank.nativeLang) === native
+  )
+  return loose?.rules ?? []
+}
+
+/** O par tem banco manual? (UI mostra a origem da correção por par.) */
+export function hasInterferenceBank(
+  targetLang: string | null | undefined,
+  nativeLang: string | null | undefined
+): boolean {
+  return interferenceRulesFor(targetLang, nativeLang).length > 0
+}
+
 export interface InterferenceHit {
+
   ruleId: string
   tag: string
   /** Trecho exatamente como o aluno escreveu. */
@@ -466,8 +630,8 @@ export interface InterferenceEntry {
 }
 
 /** Entradas do banco em forma serializável (para UI, prompts e eval). */
-export function bankEntries(): InterferenceEntry[] {
-  return INTERFERENCE_BANK.map((rule) => ({
+export function bankEntries(rules: InterferenceRule[] = INTERFERENCE_BANK): InterferenceEntry[] {
+  return rules.map((rule) => ({
     tag: rule.tag,
     wrong: rule.wrong,
     right: rule.right,
@@ -495,17 +659,24 @@ function preserveCase(original: string, replacement: string): string {
 }
 
 function normalizeWords(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9']/g, ' ').replace(/\s+/g, ' ').trim()
+  // Unicode-safe (M4): a comparação "a correção mudou alguma coisa?" precisa
+  // enxergar ñ/á/한/日 como caracteres — senão "ano" == "año" e a regra some.
+  return value
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim()
 }
 
 /**
- * Encontra ocorrências de interferência PT-BR num texto em inglês.
+ * Encontra ocorrências de interferência no texto do aluno (padrão: banco
+ * PT-BR→inglês; passe as regras do par via `interferenceRulesFor`).
  * Uma ocorrência por regra é suficiente para anotar o erro; `recast` conserta todas.
  */
-export function detectInterference(text: string): InterferenceHit[] {
+export function detectInterference(text: string, rules: InterferenceRule[] = INTERFERENCE_BANK): InterferenceHit[] {
   const hits: InterferenceHit[] = []
 
-  for (const rule of INTERFERENCE_BANK) {
+  for (const rule of rules) {
     const match = globalize(rule).exec(text)
     if (!match || !match[0].trim()) continue
 
@@ -527,10 +698,10 @@ export function detectInterference(text: string): InterferenceHit[] {
 }
 
 /** Reescreve o texto aplicando todas as regras determinísticas do banco. */
-export function recast(text: string): string {
+export function recast(text: string, rules: InterferenceRule[] = INTERFERENCE_BANK): string {
   let output = text
 
-  for (const rule of INTERFERENCE_BANK) {
+  for (const rule of rules) {
     if (!rule.to) continue
     output = output.replace(globalize(rule), (...args: unknown[]) => {
       const match = args as unknown as RegExpMatchArray
@@ -543,18 +714,22 @@ export function recast(text: string): string {
 }
 
 /** Pares erradо→certo do banco para um conjunto de tags (fixtures de prompt). */
-export function bankExamplesFor(tags: string[], limit = 3): InterferenceEntry[] {
+export function bankExamplesFor(
+  tags: string[],
+  limit = 3,
+  rules: InterferenceRule[] = INTERFERENCE_BANK
+): InterferenceEntry[] {
   const wanted = new Set(tags.map((tag) => tag.toLowerCase()))
   const picked: InterferenceEntry[] = []
 
-  for (const rule of INTERFERENCE_BANK) {
+  for (const rule of rules) {
     if (wanted.size > 0 && !wanted.has(rule.tag.toLowerCase())) continue
     picked.push({ tag: rule.tag, wrong: rule.wrong, right: rule.right, note: rule.note })
     if (picked.length >= limit) break
   }
 
   if (picked.length < limit && wanted.size > 0) {
-    for (const rule of INTERFERENCE_BANK) {
+    for (const rule of rules) {
       if (picked.some((entry) => entry.tag === rule.tag)) continue
       picked.push({ tag: rule.tag, wrong: rule.wrong, right: rule.right, note: rule.note })
       if (picked.length >= limit) break
@@ -565,9 +740,9 @@ export function bankExamplesFor(tags: string[], limit = 3): InterferenceEntry[] 
 }
 
 /** Tags mais comuns do banco, usadas para ancorar conteúdo quando o caderno está vazio. */
-export function bankTags(limit = 4): string[] {
+export function bankTags(limit = 4, rules: InterferenceRule[] = INTERFERENCE_BANK): string[] {
   const tags: string[] = []
-  for (const rule of INTERFERENCE_BANK) {
+  for (const rule of rules) {
     if (!tags.includes(rule.tag)) tags.push(rule.tag)
     if (tags.length >= limit) break
   }

@@ -1,6 +1,7 @@
 import type { JSX } from 'react'
 import type { Correction } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
+import { pairCodeLabel, targetLanguage } from '../lang'
 
 interface CorrectionListProps {
   corrections: Correction[]
@@ -10,7 +11,7 @@ interface CorrectionListProps {
 }
 
 function sourceLabel(correction: Correction): string | null {
-  if (correction.source === 'bank') return 'PT-BR'
+  if (correction.source === 'bank') return t.notebook.fromBank.replace('{pair}', pairCodeLabel())
   if (correction.source === 'local') return 'local'
   return null
 }
@@ -29,9 +30,13 @@ export function CorrectionList({ corrections, recast, variant = 'inline' }: Corr
       {corrections.map((correction, index) => (
         <div key={`${correction.original}-${index}`} className="text-xs leading-relaxed">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-danger/90 line-through decoration-danger/40">{correction.original}</span>
+            <span className="text-danger/90 line-through decoration-danger/40" dir="auto" lang={targetLanguage()}>
+              {correction.original}
+            </span>
             <span className="text-faint">→</span>
-            <span className="font-medium text-accent">{correction.corrected}</span>
+            <span className="font-medium text-accent" dir="auto" lang={targetLanguage()}>
+              {correction.corrected}
+            </span>
             <span className="rounded-full bg-panel-2 px-2 py-0.5 text-[10px] text-faint">
               {correction.tag}
             </span>
@@ -48,7 +53,9 @@ export function CorrectionList({ corrections, recast, variant = 'inline' }: Corr
       {recast && recast.trim().length > 0 && (
         <div className="pt-1 text-xs text-muted">
           <span className="text-[10px] uppercase tracking-wider text-faint">{t.tutor.recast}: </span>
-          <span className="italic text-ink/90">{recast}</span>
+          <span className="italic text-ink/90" dir="auto" lang={targetLanguage()}>
+            {recast}
+          </span>
         </div>
       )}
     </div>

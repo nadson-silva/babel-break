@@ -7,6 +7,8 @@
  * stability, difficulty, reps, lapses, state) servem só para ordenar em SQL.
  */
 import { Rating, State, createEmptyCard, fsrs, type Card, type Grade } from 'ts-fsrs'
+import type { PromptLocale } from './languages'
+import { DEFAULT_LOCALE } from './prompts'
 
 export type CardKind = 'vocab' | 'phrase' | 'error'
 
@@ -18,7 +20,7 @@ export interface CardPayload {
   front: string
   /** O que aparece no verso. */
   back: string
-  /** Instrução em PT-BR sobre o que fazer com o card. */
+  /** Instrução na língua nativa do aluno sobre o que fazer com o card. */
   hint?: string
   /** Tag de erro associada (para cards vindos do caderno). */
   tag?: string
@@ -40,15 +42,18 @@ const scheduler = fsrs()
 
 export function vocabCard(
   item: { term: string; translation: string; example: string },
-  lessonId?: number | null
+  lessonId?: number | null,
+  locale: PromptLocale = DEFAULT_LOCALE
 ): CardPayload {
-  const blanked = blankTerm(item.example, item.term)
+  const blanked = blankTerm(item.example, item.term, locale.target.tokenization)
 
   return {
     kind: 'vocab',
     front: blanked ?? `${item.term} — ${item.translation}`,
     back: `${item.term} · ${item.translation}${blanked ? `\n${item.example}` : ''}`,
-    hint: blanked ? 'Complete a frase com a palavra correta.' : 'Diga o termo em inglês.',
+    hint: blanked
+      ? 'Complete a frase com a palavra correta.'
+      : `Diga o termo em ${locale.targetName}.`,
     term: item.term,
     translation: item.translation,
     example: item.example,
@@ -56,35 +61,50 @@ export function vocabCard(
   }
 }
 
-export function phraseCard(example: string, translation: string, lessonId?: number | null): CardPayload {
+export function phraseCard(
+  example: string,
+  translation: string,
+  lessonId?: number | null,
+  locale: PromptLocale = DEFAULT_LOCALE
+): CardPayload {
   return {
     kind: 'phrase',
-    front: `Traduza para o inglês: ${translation}`,
+    front: `Traduza para o ${locale.targetName}: ${translation}`,
     back: example,
-    hint: 'Fale ou escreva a frase em inglês antes de virar o card.',
+    hint: `Fale ou escreva a frase em ${locale.targetName} antes de virar o card.`,
     lessonId
   }
 }
 
-export function errorCard(error: {
-  original: string
-  corrected: string
-  tag: string
-  note?: string | null
-}): CardPayload {
+export function errorCard(
+  error: {
+    original: string
+    corrected: string
+    tag: string
+    note?: string | null
+  },
+  locale: PromptLocale = DEFAULT_LOCALE
+): CardPayload {
   return {
     kind: 'error',
     front: `Corrija a frase: “${error.original}”`,
     back: `${error.corrected}${error.note ? `\n\n${error.note}` : ''}`,
-    hint: 'Diga a versão correta em voz alta antes de virar o card.',
+    hint: `Diga a versão correta em ${locale.targetName} antes de virar o card.`,
     tag: error.tag
   }
 }
 
-/** Substitui o termo na frase de exemplo por ___ (cloze determinístico). */
-function blankTerm(example: string, term: string): string | null {
+/**
+ * Substitui o termo na frase de exemplo por ___ (cloze determinístico).
+ * M4: fronteiras de palavra (`\b`) só fazem sentido em escrita separada por
+ * espaço; para CJK o match é por substring (o segmentador cuida do resto).
+ */
+function blankTerm(example: string, term: string, tokenization: 'space' | 'cjk' = 'space'): string | null {
   const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const regex = new RegExp(`\\b${escaped}(s|es|ing|ed)?\\b`, 'i')
+  const regex =
+    tokenization === 'cjk'
+      ? new RegExp(escaped, 'i')
+      : new RegExp(`\\b${escaped}(s|es|ing|ed)?\\b`, 'i')
   if (!regex.test(example)) return null
   return example.replace(regex, '___')
 }

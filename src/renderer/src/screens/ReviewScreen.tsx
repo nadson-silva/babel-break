@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
 import type { ReviewRating, ReviewState } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 import { ReviewQueue } from '../components/ReviewQueue'
 
 interface ReviewScreenProps {

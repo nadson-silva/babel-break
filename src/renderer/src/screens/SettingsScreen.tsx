@@ -2,15 +2,20 @@ import { useEffect, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import type {
   AppSettings,
+  LanguageOption,
   ModelInfo,
+  ProfileView,
   ProviderId,
   SettingsPayload,
   TestResult
 } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t, UI_LANGUAGES } from '../i18n'
+import { nativeLabel, targetLabel } from '../lang'
 
 interface SettingsScreenProps {
   settings: SettingsPayload
+  languages: LanguageOption[]
+  profile: ProfileView
   onChanged: (settings: SettingsPayload) => void
 }
 
@@ -21,7 +26,8 @@ function toForm(settings: SettingsPayload): AppSettings {
     ollamaModel: settings.ollamaModel,
     ollamaBaseUrl: settings.ollamaBaseUrl,
     correctionStyle: settings.correctionStyle,
-    focusMix: settings.focusMix
+    focusMix: settings.focusMix,
+    uiLang: settings.uiLang
   }
 }
 
@@ -54,7 +60,7 @@ function Section({
   )
 }
 
-export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JSX.Element {
+export function SettingsScreen({ settings, languages, profile, onChanged }: SettingsScreenProps): JSX.Element {
   const [form, setForm] = useState<AppSettings>(() => toForm(settings))
   const [models, setModels] = useState<Record<ProviderId, ModelInfo[]>>({ gemini: [], ollama: [] })
   const [modelErrors, setModelErrors] = useState<Record<ProviderId, string | null>>({
@@ -121,7 +127,7 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
       const next = await window.api.settings.update(form)
       onChanged(next)
       setForm(toForm(next))
-      setSavedAt(new Date().toLocaleTimeString('pt-BR'))
+      setSavedAt(new Date().toLocaleTimeString(form.uiLang))
       return true
     } catch (saveError) {
       setError(messageOf(saveError))
@@ -187,6 +193,9 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
   const modelValue = form[modelKey]
   const modelList = models[form.provider]
   const showManualInput = manualModel[form.provider] || modelList.length === 0
+  const targetOption = languages.find(
+    (entry) => entry.code.toLowerCase() === profile.targetLang.toLowerCase()
+  )
 
   function pickModel(value: string): void {
     setForm((current) =>
@@ -427,6 +436,52 @@ export function SettingsScreen({ settings, onChanged }: SettingsScreenProps): JS
                 <p className="mt-1 text-[11px] text-faint">{t.settings.ollamaUrlHelp}</p>
               </div>
             )}
+          </Section>
+
+          <Section title={t.settings.uiLangTitle} help={t.settings.uiLangHelp}>
+            <div className="flex flex-wrap gap-2">
+              {UI_LANGUAGES.map((language) => (
+                <button
+                  key={language.code}
+                  type="button"
+                  onClick={() => setForm((current) => ({ ...current, uiLang: language.code }))}
+                  className={`rounded-lg border px-3 py-2 text-xs transition-colors ${
+                    form.uiLang === language.code
+                      ? 'border-accent/60 bg-accent-soft text-accent'
+                      : 'border-line bg-panel-2 text-muted hover:text-ink'
+                  }`}
+                >
+                  {language.label}
+                </button>
+              ))}
+            </div>
+          </Section>
+
+          <Section title={t.settings.languagesTitle} help={t.settings.languagesHelp}>
+            <dl className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-lg border border-line-soft bg-panel-2 px-3 py-2">
+                <dt className="text-[10px] uppercase tracking-wider text-faint">{t.settings.targetLabel}</dt>
+                <dd className="mt-0.5 text-sm text-ink" dir="auto">
+                  {targetLabel(profile.targetLang)}
+                  {targetOption?.scriptDirection === 'rtl' && (
+                    <span className="ml-2 rounded-full bg-panel px-2 py-0.5 text-[10px] text-faint">
+                      ⇄ {t.languages.rtlNote}
+                    </span>
+                  )}
+                  {targetOption?.tokenization === 'cjk' && (
+                    <span className="ml-2 rounded-full bg-panel px-2 py-0.5 text-[10px] text-faint">
+                      CJK {t.languages.cjkNote}
+                    </span>
+                  )}
+                </dd>
+              </div>
+              <div className="rounded-lg border border-line-soft bg-panel-2 px-3 py-2">
+                <dt className="text-[10px] uppercase tracking-wider text-faint">{t.settings.nativeLabel}</dt>
+                <dd className="mt-0.5 text-sm text-ink" dir="auto">
+                  {nativeLabel(profile.nativeLang)}
+                </dd>
+              </div>
+            </dl>
           </Section>
 
           <Section title={t.settings.correctionTitle} help={t.settings.correctionHelp}>

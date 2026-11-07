@@ -509,22 +509,28 @@ function slug(value: string, fallback: string): string {
  * Normaliza o esboço vindo da IA: limita a 4–8 lições, remove duplicatas e
  * garante goalTag/tag legível. O nível da trilha é o nível do aluno — trilha
  * não promove ninguém.
+ *
+ * `seedFill` (M4): o banco local de complemento tem vocabulário em inglês — o
+ * idioma-fixture do app. Para outros idiomas o chamador desliga o complemento
+ * (`seedFill: false`) em vez de contaminar a trilha com termos do fixture.
  */
 export function normalizeTrackPlan(input: {
   raw: unknown
   objective: string
   level: CefrLevel
+  seedFill?: boolean
 }): TrackPlanOutput {
   const bucket = detectBucket(input.objective)
   const seed = BUCKETS[bucket]
+  const allowSeedFill = input.seedFill !== false
   const raw = (input.raw ?? {}) as Partial<TrackPlanOutput>
 
   const rawLessons = Array.isArray(raw.lessons) ? raw.lessons : []
   const lessons = rawLessons
     .map((lesson, index) => {
       const fallbackLesson = seed.lessons[index % seed.lessons.length]
-      const title = (lesson?.title ?? '').trim() || fallbackLesson.title
-      const objective = (lesson?.objective ?? '').trim() || fallbackLesson.objective
+      const title = (lesson?.title ?? '').trim() || (allowSeedFill ? fallbackLesson.title : '')
+      const objective = (lesson?.objective ?? '').trim() || (allowSeedFill ? fallbackLesson.objective : '')
       const vocabulary = (Array.isArray(lesson?.focusVocabulary) ? lesson.focusVocabulary : [])
         .map((term) => term.trim())
         .filter(Boolean)
@@ -533,15 +539,20 @@ export function normalizeTrackPlan(input: {
       return {
         title: title.slice(0, 80),
         objective: objective.slice(0, 160),
-        focusVocabulary: vocabulary.length > 0 ? vocabulary : fallbackLesson.terms.slice(0, 6).map((term) => term.term)
+        focusVocabulary:
+          vocabulary.length > 0 || !allowSeedFill
+            ? vocabulary
+            : fallbackLesson.terms.slice(0, 6).map((term) => term.term)
       }
     })
+    .filter((lesson) => lesson.title.length > 0)
     .filter((lesson, index, all) => all.findIndex((entry) => entry.title === lesson.title) === index)
 
   // Esboço raquítico (modelo fraco cortando pela metade) é completado do banco
-  // local: uma trilha sempre tem de 4 a 8 lições revisáveis.
+  // local: uma trilha sempre tem de 4 a 8 lições revisáveis. Sem o banco do
+  // idioma (M4), o que a IA devolveu é o que existe — o chamador decide.
   const filled = [...lessons]
-  for (const seedLesson of seed.lessons) {
+  for (const seedLesson of allowSeedFill ? seed.lessons : []) {
     if (filled.length >= 4) break
     if (filled.some((lesson) => lesson.title === seedLesson.title)) continue
     filled.push({
@@ -552,7 +563,7 @@ export function normalizeTrackPlan(input: {
   }
 
   return {
-    title: (raw.title ?? '').trim() || seed.title,
+    title: (raw.title ?? '').trim() || (allowSeedFill ? seed.title : (input.objective.trim().slice(0, 60) || 'Trilha de foco')),
     goalTag: slug(raw.goalTag ?? '', bucket),
     lessons: filled.slice(0, MAX_LESSONS)
   }

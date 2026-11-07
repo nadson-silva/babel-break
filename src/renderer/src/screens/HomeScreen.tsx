@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
 import type { GuidedSession, HomeState, LessonSummary, SettingsPayload } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import { t } from '../i18n'
 import { GUIDED_ORDER, guidedStepPosition, guidedStepTitle } from '../components/guidedSteps'
 
 interface HomeScreenProps {

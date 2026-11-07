@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { errorFocus } from './adapt'
 import { fallbackExercises, fallbackLessonContent } from './fallback'
-import { exercisePrompt, lessonContentPrompt, tutorSystem } from './prompts'
+import { DEFAULT_LOCALE, exercisePrompt, lessonContentPrompt, tutorSystem } from './prompts'
 
 const content = fallbackLessonContent({
   title: 'Rotina e passado',
@@ -86,7 +86,8 @@ describe('prompts do loop', () => {
       unitTitle: 'Trabalho',
       level: 'A2',
       goal: 'entrevista para dev',
-      errors: focus.map((entry) => ({ ...entry }))
+      errors: focus.map((entry) => ({ ...entry })),
+      locale: DEFAULT_LOCALE
     })
     expect(lesson.user).toContain('articles (3x)')
     expect(lesson.user).toContain('I am a developer.')
@@ -96,7 +97,8 @@ describe('prompts do loop', () => {
       content,
       level: 'A2',
       goal: 'entrevista para dev',
-      errors: focus.map((entry) => ({ ...entry }))
+      errors: focus.map((entry) => ({ ...entry })),
+      locale: DEFAULT_LOCALE
     })
     expect(exercises.user).toContain('targetTags')
     expect(exercises.user).toContain('Pelo menos 2 exercícios')
@@ -111,7 +113,8 @@ describe('prompts do loop', () => {
       vocabulary: [{ term: 'flight', translation: 'voo' }],
       summary: 'O aluno falou do trabalho.',
       lesson: { title: 'Passado simples', objective: 'Narrar', grammar: ['Past simple'] },
-      topic: 'rotina'
+      topic: 'rotina',
+      locale: DEFAULT_LOCALE
     })
 
     expect(system).toContain('B1')

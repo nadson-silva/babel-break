@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { JSX } from 'react'
-import type { ExerciseView, GradeFeedback } from '../../../shared/types'
-import { t } from '../i18n/pt-BR'
+import type { ExerciseType, ExerciseView, GradeFeedback } from '../../../shared/types'
+import { t } from '../i18n'
+import { targetIsCjk, targetLabel, targetLanguage } from '../lang'
 
 interface ExercisePlayerProps {
   exercises: ExerciseView[]
@@ -18,18 +19,20 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
-function typeLabel(type: ExerciseView['type']): string {
+/** Rótulos no idioma da interface (M4) — o "inglês" fixo virou o idioma do perfil. */
+function typeLabel(type: ExerciseType): string {
+  const lang = targetLabel()
   switch (type) {
     case 'multiple_choice':
-      return 'Múltipla escolha'
+      return t.player.typeMultipleChoice
     case 'cloze':
-      return 'Complete a frase'
+      return t.player.typeCloze
     case 'translate':
-      return 'Traduza para o inglês'
+      return t.player.typeTranslate.replace('{lang}', lang)
     case 'order':
-      return 'Ordene a frase'
+      return t.player.typeOrder
     case 'free_production':
-      return 'Produção livre'
+      return t.player.typeFreeProduction
     default:
       return type
   }
@@ -82,8 +85,9 @@ export function ExercisePlayer({
   async function check(): Promise<void> {
     if (!exercise) return
 
+    // Em escrita CJK as unidades se juntam sem espaço (o gabarito não tem espaços).
     const response = isOrder
-      ? picked.map((tokenIndex) => exercise.tokens[tokenIndex]).join(' ')
+      ? picked.map((tokenIndex) => exercise.tokens[tokenIndex]).join(targetIsCjk() ? '' : ' ')
       : answer.trim()
 
     if (!response) {
@@ -152,7 +156,9 @@ export function ExercisePlayer({
       )}
 
       <p className="mt-3 text-xs leading-relaxed text-muted">{exercise.instruction}</p>
-      <p className="mt-2 text-lg font-medium leading-relaxed text-ink">{exercise.prompt}</p>
+      <p className="mt-2 text-lg font-medium leading-relaxed text-ink" dir="auto" lang={targetLanguage()}>
+        {exercise.prompt}
+      </p>
 
       <div className="mt-5">
         {exercise.type === 'multiple_choice' && (
@@ -181,7 +187,9 @@ export function ExercisePlayer({
                   >
                     {String.fromCharCode(65 + optionIndex)}
                   </span>
-                  {option}
+                  <span dir="auto" lang={targetLanguage()}>
+                    {option}
+                  </span>
                 </button>
               )
             })}
@@ -190,7 +198,7 @@ export function ExercisePlayer({
 
         {isOrder && (
           <div>
-            <div className="min-h-12 rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-sm text-ink">
+            <div className="min-h-12 rounded-xl border border-line bg-panel-2 px-3 py-2.5 text-sm text-ink" dir="auto" lang={targetLanguage()}>
               {picked.length === 0 ? (
                 <span className="text-faint">{t.player.orderHint}</span>
               ) : (
@@ -245,7 +253,7 @@ export function ExercisePlayer({
               setError(null)
             }}
             disabled={Boolean(feedback)}
-            placeholder={t.player.answerPlaceholder}
+            placeholder={t.player.answerPlaceholder.replace('{lang}', targetLabel())}
             className="w-full rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50 disabled:opacity-70"
           />
         )}
@@ -259,7 +267,7 @@ export function ExercisePlayer({
             }}
             disabled={Boolean(feedback)}
             rows={4}
-            placeholder={t.player.answerPlaceholder}
+            placeholder={t.player.answerPlaceholder.replace('{lang}', targetLabel())}
             className="w-full resize-none rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-faint focus:border-accent/50 disabled:opacity-70"
           />
         )}
@@ -279,10 +287,10 @@ export function ExercisePlayer({
             {feedback.correct ? t.player.correct : t.player.incorrect}
           </div>
           <p className="mt-1 leading-relaxed text-ink/90">{feedback.feedback}</p>
-          {feedback.corrected && feedback.corrected.trim() !== (isOrder ? picked.map((tokenIndex) => exercise.tokens[tokenIndex]).join(' ') : answer.trim()) && (
+          {feedback.corrected && feedback.corrected.trim() !== (isOrder ? picked.map((tokenIndex) => exercise.tokens[tokenIndex]).join(targetIsCjk() ? '' : ' ') : answer.trim()) && (
             <div className="mt-2 text-xs text-muted">
               <span className="text-faint">{t.player.expected}: </span>
-              {feedback.corrected}
+              <span dir="auto" lang={targetLanguage()}>{feedback.corrected}</span>
             </div>
           )}
           {feedback.errorTags.length > 0 && (
