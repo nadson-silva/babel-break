@@ -4,6 +4,7 @@
  * explicações do aluno — e um idioma sem dicionário cai em inglês, nunca em
  * frase inventada.
  */
+import { UI_LANGUAGES } from '../shared/i18n-languages'
 import { describe, expect, it } from 'vitest'
 import {
   RUNTIME_TEXT_KEYS,
@@ -86,5 +87,25 @@ describe('cards e agendamento no idioma do aluno', () => {
     expect(localizeDecimal('4.5', 'pt-BR')).toBe('4,5')
     expect(localizeDecimal('4.5', 'es')).toBe('4,5')
     expect(localizeDecimal('4.5', 'en')).toBe('4.5')
+  })
+})
+
+describe('V2 (D8): interface e runtime falam os mesmos idiomas', () => {
+  it('todo idioma oferecido na UI tem dicionário de runtime no main', () => {
+    // Se a UI ganhasse um idioma novo sem o dicionário de runtime atrás, o aluno
+    // trocaria a interface e continuaria recebendo card/recap/erro no idioma
+    // antigo. A checagem atravessa a fronteira de propósito.
+    const missing = UI_LANGUAGES.map((entry) => entry.code).filter(
+      (code) => !RUNTIME_TEXT_LANGUAGES.includes(code)
+    )
+    expect(missing).toEqual([])
+  })
+
+  it('cada idioma de runtime cobre todas as chaves, sem buraco no meio da frase', () => {
+    for (const lang of RUNTIME_TEXT_LANGUAGES) {
+      const templates = runtimeTemplates(lang) as unknown as Record<string, string>
+      const missing = RUNTIME_TEXT_KEYS.filter((key) => typeof templates[key] !== 'string')
+      expect(missing, lang).toEqual([])
+    }
   })
 })

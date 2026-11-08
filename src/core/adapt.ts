@@ -116,28 +116,99 @@ export function levelFromEstimate(estimate: number): CefrLevel {
   return 'C1'
 }
 
+/** Fronteira (em 0–5) entre dois níveis vizinhos: A1|A2 = 1,5 · A2|B1 = 2,5 · … */
+export function boundaryBetween(level: CefrLevel, next: CefrLevel): number {
+  const higher = Math.max(levelIndex(level), levelIndex(next))
+  return 0.5 + higher
+}
+
+export interface ReestimateInput {
+  skills: SkillEstimate[]
+  current: CefrLevel
+  /** Só habilidades com esta confiança entram na conta. */
+  minConfidence?: number
+  /** Quantas habilidades independentes precisam concordar (v2/D10). */
+  minSkills?: number
+  /**
+   * V2 (D10): banda morta em torno da fronteira. Uma lição ruim perto de A2|B1
+   * não pode mandar o aluno de um nível para o outro a cada semana — a nota só
+   * muda quando a média passa a fronteira com folga.
+   */
+  deadBand?: number
+}
+
+export interface ReestimateSuggestion {
+  cefr: CefrLevel
+  confidence: number
+  /** Por que mexeu (ou por que não mexeu) — vai para o log e para a UI. */
+  reason: 'up' | 'down' | 'no-consensus' | 'thin-evidence' | 'dead-band' | 'ceiling'
+  average: number
+}
+
+const DEFAULT_MIN_CONFIDENCE = 0.55
+const DEFAULT_MIN_SKILLS = 2
+/** 0,25 numa escala de 5 = meio degrau de diferença não move nível. */
+const DEFAULT_DEAD_BAND = 0.25
+
 /**
- * Recomenda um novo nível a partir das estimativas por habilidade.
- * Só sugere com confiança acumulada e move no máximo um degrau, para o
- * nível nunca oscilar por causa de uma lição ruim. O piso (0.55) fica acima
- * da confiança que o teste de nivelamento sozinho produz: nível muda com
- * evidência de prática, não com uma prova de 10 questões.
+ * Recomenda um novo nível a partir das estimativas por habilidade (v2/D10).
+ *
+ * Quatro regras, todas conservadoras:
+ *
+ * 1. **peso por confiança**: `grammar` com 0,9 de confiança manda mais que
+ *    `vocab` com 0,4 (média ponderada, não média simples);
+ * 2. **mínimo de amostras**: pelo menos `minSkills` habilidades acima de
+ *    `minConfidence`; uma habilidade sozinha não redefine o aluno;
+ * 3. **banda morta**: a média precisa passar a fronteira do nível atual com
+ *    folga (`deadBand`), senão o nível fica onde está — era isso que fazia
+ *    A2↔B1 ficar alternando a cada lição;
+ * 4. **um degrau por vez** e nada além de C1 (o plano não tem C2).
  */
-export function reestimateLevel(
-  skills: SkillEstimate[],
-  current: CefrLevel,
-  minConfidence = 0.55
-): { cefr: CefrLevel; confidence: number } | null {
-  const usable = skills.filter((skill) => skill.confidence >= minConfidence)
-  if (usable.length === 0) return null
+export function reestimateLevel(input: ReestimateInput): ReestimateSuggestion | null {
+  const minConfidence = input.minConfidence ?? DEFAULT_MIN_CONFIDENCE
+  const minSkills = input.minSkills ?? DEFAULT_MIN_SKILLS
+  const deadBand = input.deadBand ?? DEFAULT_DEAD_BAND
 
-  const confidence = usable.reduce((sum, skill) => sum + skill.confidence, 0) / usable.length
-  const average = usable.reduce((sum, skill) => sum + skill.estimate, 0) / usable.length
+  const usable = input.skills.filter((skill) => skill.confidence >= minConfidence)
+  if (usable.length < minSkills) return null
+
+  const mass = usable.reduce((sum, skill) => sum + skill.confidence, 0)
+  if (mass <= 0) return null
+
+  const average = usable.reduce((sum, skill) => sum + skill.estimate * skill.confidence, 0) / mass
   const suggested = levelFromEstimate(average)
-  const delta = levelIndex(suggested) - levelIndex(current)
+  const delta = levelIndex(suggested) - levelIndex(input.current)
+  const confidence = mass / usable.length
 
-  if (delta === 0) return null
+  if (delta === 0) {
+    // No teto a média pode até ser altíssima: não existe C2 no plano, e a UI
+    // precisa saber por que nada mudou em vez de ler "sem consenso".
+    const atCeiling =
+      levelIndex(input.current) === CEFR_LEVELS.length - 1 && average >= boundaryBetween('B2', 'C1')
+    return {
+      cefr: input.current,
+      confidence,
+      reason: atCeiling ? 'ceiling' : 'no-consensus',
+      average
+    }
+  }
 
-  const bounded = CEFR_LEVELS[levelIndex(current) + Math.sign(delta)] ?? current
-  return { cefr: bounded, confidence }
+  const direction = Math.sign(delta)
+  const target = CEFR_LEVELS[levelIndex(input.current) + direction]
+  if (!target) return { cefr: input.current, confidence, reason: 'ceiling', average }
+
+  const boundary = boundaryBetween(input.current, target)
+  // Andando para cima, a média tem que ficar acima da fronteira; para baixo,
+  // abaixo. Dentro da banda morta, nada muda.
+  const beyond = direction > 0 ? average - boundary : boundary - average
+  if (beyond < deadBand) {
+    return { cefr: input.current, confidence, reason: 'dead-band', average }
+  }
+
+  return {
+    cefr: target,
+    confidence,
+    reason: direction > 0 ? 'up' : 'down',
+    average
+  }
 }

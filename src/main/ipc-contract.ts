@@ -45,7 +45,20 @@ const CHANNEL_CONTRACTS = {
         correctionStyle: z.enum(['recast', 'explicit', 'both']),
         focusMix: z.number().min(0).max(1),
         uiLang: z.string().max(10),
-        pregenerate: z.boolean()
+        pregenerate: z.boolean(),
+        // V2: papéis de modelo, voz e retenção do FSRS.
+        quickModel: z.string().max(300),
+        strongModel: z.string().max(300),
+        voiceEnabled: z.boolean(),
+        ttsModel: z.string().max(300),
+        asrModel: z.string().max(300),
+        voiceName: z.string().max(60),
+        speechRate: z.enum(['slow', 'normal', 'fast']),
+        preferSystemVoices: z.boolean(),
+        retention: z.number().min(0.7).max(0.97),
+        reminderEnabled: z.boolean(),
+        reminderDays: z.array(z.number().int().min(0).max(6)).max(7),
+        reminderTime: z.number().int().min(0).max(1_439)
       })
       .partial()
   ]),
@@ -292,6 +305,22 @@ const CHANNEL_CONTRACTS = {
   'voice:clear-cache': noArgs,
 
   // --- v2: jobs nomeados (E9) ------------------------------------------------
+  // --- v2: lembrete opt-in ---------------------------------------------------
+  'reminder:get': noArgs,
+  'reminder:update': z.tuple([
+    z
+      .object({
+        enabled: z.boolean().optional(),
+        days: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+        time: z.union([z.string().max(5), z.number().int().min(0).max(1_439)]).optional()
+      })
+      .optional()
+  ]),
+  'reminder:test': noArgs,
+  // --- v2: verificação de versão ---------------------------------------------
+  'update:state': noArgs,
+  'update:check': z.tuple([z.boolean().optional()]),
+  'update:open': z.tuple([z.string().max(500).optional()]),
   'job:list': noArgs,
   'job:cancel': z.tuple([z.string().min(1).max(120)])
 } satisfies Record<string, z.ZodType<unknown[]>>

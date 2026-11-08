@@ -3,6 +3,8 @@ import type { JSX, ReactNode } from 'react'
 import type {
   AppSettings,
   AudioCacheStats,
+  ReminderView,
+  UpdateCheckView,
   LanguageOption,
   ModelInfo,
   ProfileState,
@@ -22,6 +24,8 @@ interface SettingsScreenProps {
   languages: LanguageOption[]
   profile: ProfileView
   onChanged: (settings: SettingsPayload) => void
+  /** V2: perfil alterado (mix de foco) — o App recarrega o estado do perfil. */
+  onProfileChanged?: () => void
   /** Memória reiniciada: o App assume o perfil novo (o onboarding recomeça). */
   onMemoryReset: (state: ProfileState) => void
 }
@@ -44,7 +48,11 @@ function toForm(settings: SettingsPayload): AppSettings {
     asrModel: settings.asrModel,
     voiceName: settings.voiceName,
     speechRate: settings.speechRate,
-    preferSystemVoices: settings.preferSystemVoices
+    preferSystemVoices: settings.preferSystemVoices,
+    retention: settings.retention,
+    reminderEnabled: settings.reminderEnabled,
+    reminderDays: settings.reminderDays,
+    reminderTime: settings.reminderTime
   }
 }
 
@@ -88,7 +96,8 @@ export function SettingsScreen({
   languages,
   profile,
   onChanged,
-  onMemoryReset
+  onMemoryReset,
+  onProfileChanged
 }: SettingsScreenProps): JSX.Element {
   const [form, setForm] = useState<AppSettings>(() => toForm(settings))
   const [models, setModels] = useState<Record<ProviderId, ModelInfo[]>>({ gemini: [], ollama: [] })
@@ -120,8 +129,15 @@ export function SettingsScreen({
   const [cache, setCache] = useState<PrewarmState | null>(null)
   // V2: cache de áudio (mostra e limpa na seção de voz).
   const [audioCache, setAudioCache] = useState<AudioCacheStats | null>(null)
+  // V2: o mix de foco é do perfil (dois alunos não estudam o mesmo assunto).
+  const [profileMix, setProfileMix] = useState<number>(profile.focusMix)
   const [clearingAudio, setClearingAudio] = useState(false)
   const [audioMessage, setAudioMessage] = useState<string | null>(null)
+  // V2: lembrete opt-in (o estado efetivo vem do main, com próxima janela).
+  const [reminder, setReminder] = useState<ReminderView | null>(null)
+  // V2: verificação de versão (só informa; o download é decisão do usuário).
+  const [update, setUpdate] = useState<UpdateCheckView | null>(null)
+  const [checking, setChecking] = useState(false)
   const [warming, setWarming] = useState(false)
   const [warmMessage, setWarmMessage] = useState<string | null>(null)
 
@@ -130,10 +146,16 @@ export function SettingsScreen({
   }, [settings])
 
   useEffect(() => {
+    setProfileMix(profile.focusMix)
+  }, [profile.focusMix, profile.id])
+
+  useEffect(() => {
     void loadModels('gemini')
     void loadModels('ollama')
     void loadCache()
     void window.api.voice.cache().then(setAudioCache).catch(() => undefined)
+    void window.api.reminder.get().then(setReminder).catch(() => undefined)
+    void window.api.update.state().then(setUpdate).catch(() => undefined)
   }, [])
 
   async function loadCache(): Promise<void> {
@@ -552,7 +574,9 @@ export function SettingsScreen({
 
           <Section title={t.settings.uiLangTitle} help={t.settings.uiLangHelp}>
             <div className="flex flex-wrap gap-2">
-              {UI_LANGUAGES.map((language) => (
+              {/* V2 (D8): só oferece um idioma de interface que o main também
+                  escreve — trocar para ES não pode deixar card/recap em PT. */}
+              {UI_LANGUAGES.filter((language) => settings.runtimeLanguages.includes(language.code)).map((language) => (
                 <button
                   key={language.code}
                   type="button"
@@ -622,22 +646,50 @@ export function SettingsScreen({
           </Section>
 
           <Section title={t.settings.focusTitle} help={t.settings.focusHelp}>
+            {/* V2: o mix é do PERFIL — quem estuda entrevista e quem estuda
+                viagem não compartilham a mesma recomendação. */}
             <div className="flex items-center gap-4">
               <input
                 type="range"
                 min={0}
                 max={70}
                 step={5}
-                value={Math.round(form.focusMix * 100)}
+                value={Math.round(profileMix * 100)}
+                onChange={(event) => {
+                  const value = Number(event.target.value) / 100
+                  setProfileMix(value)
+                  void window.api.profiles
+                    .update({ profileId: profile.id, focusMix: value })
+                    .then(() => onProfileChanged?.())
+                    .catch((error: unknown) => setError(messageOf(error)))
+                }}
+                className="h-1.5 flex-1 accent-[#4cc2a0]"
+              />
+              <span className="w-14 text-right text-sm font-semibold text-accent">
+                {Math.round(profileMix * 100)}%
+              </span>
+            </div>
+          </Section>
+
+          {/* --- V2 (D11): retenção do FSRS ------------------------------- */}
+          <Section title={t.settings.retentionTitle} help={t.settings.retentionHelp}>
+            <div className="flex items-center gap-4">
+              <input
+                type="range"
+                min={70}
+                max={97}
+                step={1}
+                value={Math.round(form.retention * 100)}
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, focusMix: Number(event.target.value) / 100 }))
+                  setForm((current) => ({ ...current, retention: Number(event.target.value) / 100 }))
                 }
                 className="h-1.5 flex-1 accent-[#4cc2a0]"
               />
               <span className="w-14 text-right text-sm font-semibold text-accent">
-                {Math.round(form.focusMix * 100)}%
+                {Math.round(form.retention * 100)}%
               </span>
             </div>
+            <p className="mt-2 text-[11px] text-faint">{t.settings.retentionNote}</p>
           </Section>
 
           {/* --- V2: modelo por papel ------------------------------------- */}
@@ -812,6 +864,150 @@ export function SettingsScreen({
                 </div>
               </div>
             </div>
+          </Section>
+
+          {/* --- V2: lembrete opt-in (§14) ------------------------------- */}
+          <Section title={t.settings.remindersTitle} help={t.settings.remindersHelp}>
+            <label className="flex items-start gap-2 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={form.reminderEnabled}
+                onChange={(event) => {
+                  const enabled = event.target.checked
+                  setForm((current) => ({ ...current, reminderEnabled: enabled }))
+                  void window.api.reminder
+                    .update({ enabled })
+                    .then(setReminder)
+                    .catch((error: unknown) => setError(messageOf(error)))
+                }}
+                className="mt-0.5 accent-[#4cc2a0]"
+              />
+              <span>{t.settings.remindersEnable}</span>
+            </label>
+
+            <div className="mt-4">
+              <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.remindersDays}</span>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {t.settings.dayShort.map((label, day) => {
+                  const active = form.reminderDays.includes(day)
+                  return (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => {
+                        const days = active
+                          ? form.reminderDays.filter((entry) => entry !== day)
+                          : [...form.reminderDays, day].sort((a, b) => a - b)
+                        setForm((current) => ({ ...current, reminderDays: days }))
+                        void window.api.reminder
+                          .update({ days })
+                          .then(setReminder)
+                          .catch((error: unknown) => setError(messageOf(error)))
+                      }}
+                      className={`rounded-lg border px-2.5 py-1 text-[11px] transition-colors ${
+                        active ? 'border-accent/60 bg-accent-soft text-accent' : 'border-line bg-panel-2 text-muted hover:text-ink'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="mt-4 flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-muted">
+                <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.remindersTime}</span>
+                <input
+                  type="time"
+                  value={`${String(Math.floor(form.reminderTime / 60)).padStart(2, '0')}:${String(form.reminderTime % 60).padStart(2, '0')}`}
+                  onChange={(event) => {
+                    const parts = event.target.value.split(':')
+                    const hours = Number(parts[0])
+                    const minutes = Number(parts[1])
+                    const minuteOfDay =
+                      (Number.isFinite(hours) ? Math.min(23, Math.max(0, hours)) : 19) * 60 +
+                      (Number.isFinite(minutes) ? Math.min(59, Math.max(0, minutes)) : 0)
+                    setForm((current) => ({ ...current, reminderTime: minuteOfDay }))
+                    void window.api.reminder
+                      .update({ time: minuteOfDay })
+                      .then(setReminder)
+                      .catch((error: unknown) => setError(messageOf(error)))
+                  }}
+                  className="rounded-lg border border-line bg-panel-2 px-2 py-1 text-xs text-ink outline-none focus:border-accent/50"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  void window.api.reminder
+                    .test()
+                    .then((result) => {
+                      if (!result.ok) setError(t.settings.remindersUnsupported)
+                    })
+                    .catch((error: unknown) => setError(messageOf(error)))
+                }}
+                className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+              >
+                {t.settings.remindersTest}
+              </button>
+            </div>
+
+            {reminder && (
+              <p className="mt-3 text-[11px] text-faint">
+                {reminder.enabled && reminder.days.length > 0
+                  ? reminder.nextAt
+                    ? `${t.settings.remindersNext}: ${new Date(reminder.nextAt).toLocaleString(getUiLanguage())} · ${reminder.pending} ${t.settings.remindersPending}`
+                    : t.settings.remindersNone
+                  : t.settings.remindersOff}
+                {reminder.enabled && !reminder.supported && ` · ${t.settings.remindersUnsupported}`}
+              </p>
+            )}
+          </Section>
+
+          {/* --- V2: versão ------------------------------------------------- */}
+          <Section title={t.settings.aboutTitle} help={t.settings.aboutHelp}>
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-ink">
+                {t.settings.versionLabel}: {update?.current ?? '—'}
+                {settings.runtime.electron ? ` · Electron ${settings.runtime.electron}` : ''}
+              </span>
+              <button
+                type="button"
+                disabled={checking}
+                onClick={() => {
+                  setChecking(true)
+                  void window.api.update
+                    .check(true)
+                    .then(setUpdate)
+                    .catch((error: unknown) => setError(messageOf(error)))
+                    .finally(() => setChecking(false))
+                }}
+                className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink disabled:opacity-50"
+              >
+                {checking ? t.settings.checkingUpdate : t.settings.checkUpdate}
+              </button>
+              {update?.state === 'available' && (
+                <button
+                  type="button"
+                  onClick={() => void window.api.update.open(update.url ?? undefined).catch(() => undefined)}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-ink transition-colors hover:bg-accent/90"
+                >
+                  {t.settings.downloadVersion.replace('{version}', update.latest ?? '')}
+                </button>
+              )}
+            </div>
+            {update && (
+              <p className="mt-2 text-[11px] text-faint">
+                {update.state === 'current' && t.settings.upToDate.replace('{version}', update.latest ?? update.current)}
+                {update.state === 'available' && t.settings.updateAvailable.replace('{version}', update.latest ?? '')}
+                {update.state === 'error' && `${t.settings.updateFailed}: ${update.error ?? ''}`}
+                {update.state === 'unknown' && t.settings.updateNever}
+                {update.checkedAt ? ` · ${new Date(update.checkedAt).toLocaleString(getUiLanguage())}` : ''}
+              </p>
+            )}
+            <p className="mt-2 text-[11px] leading-relaxed text-faint">{t.settings.updateNote}</p>
           </Section>
 
           <Section title={t.cache.title} help={t.cache.help}>

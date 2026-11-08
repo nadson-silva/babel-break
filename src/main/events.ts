@@ -15,6 +15,8 @@ export type StudentEvent =
   | 'settings-saved'
   /** V2: memória de um perfil apagada (perfil continua vivo, só esquece). */
   | 'memory-reset'
+  /** V2: o aluno clicou no lembrete — a janela vem ao foco. */
+  | 'reminder-opened'
   /** V2: o aluno trocou de perfil — jobs em espera e fila ociosa param no ato. */
   | 'profile-switched'
   | 'profile-deleted'

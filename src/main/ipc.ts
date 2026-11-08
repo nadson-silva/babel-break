@@ -1,13 +1,16 @@
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { handle } from './ipc-contract'
 import type { AppSettings, LanguageOption, ProviderId, SettingsPayload, TestResult } from '../shared/types'
 import { LANGUAGES } from '../core/languages'
+import { RUNTIME_TEXT_LANGUAGES } from '../core/runtime-text'
 import { getDbStatus } from './db'
 import { registerDashboardIpc } from './dashboard'
 import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
 import { registerPrewarmIpc } from './prewarm'
+import { registerReminderIpc } from './reminders'
+import { registerUpdateIpc } from './updater'
 import { registerPortableIpc } from './portable'
 import { registerVoiceIpc } from './voice'
 import { registerJobsIpc } from './jobs-ipc'
@@ -15,7 +18,7 @@ import { registerReportsIpc } from './reports'
 import { refreshProviderStatus } from './provider-status'
 import { registerScenarioIpc } from './scenario'
 import { registerTracksIpc } from './tracks'
-import { emitStudentEvent } from './events'
+import { emitStudentEvent, onStudentEvent } from './events'
 import { logFilePath } from './log'
 import { getProvider } from './providers'
 import { roleViews } from './ai'
@@ -42,6 +45,7 @@ async function settingsPayload(): Promise<SettingsPayload> {
       node: process.versions.node,
       platform: process.platform
     },
+    runtimeLanguages: [...RUNTIME_TEXT_LANGUAGES],
     // V2: a tela de configurações diz qual modelo está em cada papel em vez de
     // mostrar três campos iguais sem contexto.
     roles: roleViews(),
@@ -65,6 +69,16 @@ export function registerIpcHandlers(): void {
 
   // M6 (C10): o renderer pede o caminho do log para "reportar bug" ter o que anexar.
   handle('log:get-path', (): { path: string } => ({ path: logFilePath() ?? '' }))
+
+  // V2: clicar no lembrete traz a janela de volta (o evento chega por `events`).
+  onStudentEvent((payload) => {
+    if (payload.event !== 'reminder-opened') return
+    for (const window of BrowserWindow.getAllWindows()) {
+      if (window.isDestroyed()) continue
+      if (window.isMinimized()) window.restore()
+      window.focus()
+    }
+  })
 
   // M6 (C4): a tela de recuperação lê o estado do banco do último boot.
   handle('db:status', () => getDbStatus())
@@ -135,6 +149,8 @@ export function registerIpcHandlers(): void {
   registerReportsIpc()
   registerPrewarmIpc()
   registerPortableIpc()
+  registerReminderIpc()
+  registerUpdateIpc()
   registerVoiceIpc()
   registerJobsIpc()
 }

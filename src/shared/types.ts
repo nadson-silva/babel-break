@@ -46,6 +46,31 @@ export interface AppSettings {
   speechRate: SpeechRate
   /** Usa a voz do sistema (Web Speech) em vez de gastar token no provedor. */
   preferSystemVoices: boolean
+  /**
+   * V2 (D11): retenção pedida ao FSRS (0,70–0,97). Mais baixa = intervalos
+   * maiores e mais esquecimento; mais alta = fila de revisão maior. Escolha do
+   * aluno, não constante de biblioteca.
+   */
+  retention: number
+  /** V2: lembrete opt-in (§14) — desligado por padrão, convite sem culpa. */
+  reminderEnabled: boolean
+  /** 0=dom … 6=sáb. */
+  reminderDays: number[]
+  /** Minutos desde a meia-noite (0–1439). */
+  reminderTime: number
+}
+
+/** V2: estado do lembrete para a tela de Configurações. */
+export interface ReminderView {
+  enabled: boolean
+  days: number[]
+  minuteOfDay: number
+  time: string
+  nextAt: number | null
+  /** Cards vencidos agora (o lembrete só dispara com trabalho pendente). */
+  pending: number
+  lastFiredAt: number | null
+  supported: boolean
 }
 
 /**
@@ -93,6 +118,13 @@ export interface SettingsPayload extends AppSettings {
   hasGeminiKey: boolean
   secureStorage: SecureStorageInfo
   runtime: RuntimeInfo
+  /**
+   * V2 (D8): idiomas em que o **main** escreve texto de runtime (cards, recap,
+   * erros de geração, rótulos de revisão). A UI só oferece um idioma de
+   * interface que o main também cobre — senão o aluno trocaria para ES e
+   * continuaria recebendo card em português.
+   */
+  runtimeLanguages: string[]
   /** V2: modelo realmente usado em cada papel (chat/quick/strong). */
   roles: ModelRoleView[]
   /** V2: o que o provedor atual consegue fazer com voz. */
@@ -103,6 +135,18 @@ export interface SettingsPayload extends AppSettings {
   voices: string[]
   /** V2: dá para usar a voz do sistema aqui? (o renderer responde de verdade) */
   systemVoicesPossible: boolean
+}
+
+/** Verificação de atualização (v2): informar, não instalar pelas costas do aluno. */
+export interface UpdateCheckView {
+  state: 'unknown' | 'current' | 'available' | 'error'
+  current: string
+  latest: string | null
+  url: string | null
+  notes: string | null
+  checkedAt: number | null
+  error: string | null
+  repository: string
 }
 
 export interface ModelInfo {
@@ -223,6 +267,15 @@ export interface ProfilesView {
   colors: string[]
   /** Perfil único = sem seletor na UI (v1 continua parecendo v1). */
   multiProfile: boolean
+}
+
+/** Resposta do "notificar agora" (o sistema pode não suportar notificação). */
+export interface ReminderTestResult {
+  ok: boolean
+  title: string
+  body: string
+  reason: 'unsupported' | 'shown'
+  enabled: boolean
 }
 
 export interface CreateProfileInput {

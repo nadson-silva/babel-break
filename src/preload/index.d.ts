@@ -29,6 +29,8 @@ import type {
   PrewarmCycleOutcome,
   PrewarmState,
   RecapView,
+  ReminderTestResult,
+  ReminderView,
   ReportInput,
   ReportKind,
   ReportItemView,
@@ -141,11 +143,23 @@ declare global {
         cache(): Promise<AudioCacheStats>
         clearCache(): Promise<number>
       }
+      /** V2: lembrete opt-in. */
+      reminder: {
+        get(): Promise<ReminderView>
+        update(patch: { enabled?: boolean; days?: number[]; time?: string | number }): Promise<ReminderView>
+        test(): Promise<ReminderTestResult>
+      }
       /** V2 (E9): jobs longos com progresso e cancelamento. */
       job: {
         list(): Promise<JobView[]>
         cancel(jobId: string): Promise<boolean>
         onEvent(callback: (event: JobEvent) => void): () => void
+      }
+      /** V2: versão nova? (informar com link, nunca instalar sozinho) */
+      update: {
+        state(): Promise<UpdateCheckView>
+        check(force?: boolean): Promise<UpdateCheckView>
+        open(url?: string): Promise<boolean>
       }
       review: {
         state(limit?: number): Promise<ReviewState>

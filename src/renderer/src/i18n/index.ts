@@ -12,15 +12,10 @@ import { en } from './en'
 import type { LanguageOption } from '../../../shared/types'
 export type Dictionary = typeof ptBR
 
-export interface UiLanguage {
-  code: string
-  label: string
-}
-
-export const UI_LANGUAGES: UiLanguage[] = [
-  { code: 'pt-BR', label: 'Português (Brasil)' },
-  { code: 'en', label: 'English' }
-]
+// V2 (D8): a lista vive em `shared/` para o main poder checá-la contra o próprio
+// dicionário de runtime; o renderer reexporta para os imports existentes.
+export { UI_LANGUAGES } from '../../../shared/i18n-languages'
+export type { UiLanguage } from '../../../shared/i18n-languages'
 
 const DICTIONARIES: Record<string, Dictionary> = {
   'pt-BR': ptBR,

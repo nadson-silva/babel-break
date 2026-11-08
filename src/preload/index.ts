@@ -43,6 +43,8 @@ import type {
   PrewarmState,
   UpdateProfileInput,
   RecapView,
+  ReminderTestResult,
+  ReminderView,
   ReportInput,
   ReportKind,
   ReportItemView,
@@ -60,6 +62,7 @@ import type {
   TracksView,
   TutorSendRequest,
   TutorTurnResult,
+  UpdateCheckView,
   DbStatusView,
   LogPathView
 } from '../shared/types'
@@ -245,6 +248,19 @@ const api = {
     history: (limit?: number): Promise<SpeechHistoryView> => ipcRenderer.invoke('voice:history', limit),
     cache: (): Promise<AudioCacheStats> => ipcRenderer.invoke('voice:cache'),
     clearCache: (): Promise<number> => ipcRenderer.invoke('voice:clear-cache')
+  },
+  /** V2: verificar se existe versão nova (abre a página da release, não instala). */
+  update: {
+    state: (): Promise<UpdateCheckView> => ipcRenderer.invoke('update:state'),
+    check: (force?: boolean): Promise<UpdateCheckView> => ipcRenderer.invoke('update:check', force),
+    open: (url?: string): Promise<boolean> => ipcRenderer.invoke('update:open', url)
+  },
+  /** V2: lembrete opt-in (convite, não cobrança). */
+  reminder: {
+    get: (): Promise<ReminderView> => ipcRenderer.invoke('reminder:get'),
+    update: (patch: { enabled?: boolean; days?: number[]; time?: string | number }): Promise<ReminderView> =>
+      ipcRenderer.invoke('reminder:update', patch),
+    test: (): Promise<ReminderTestResult> => ipcRenderer.invoke('reminder:test')
   },
   /** V2 (E9): jobs longos com progresso e cancelamento. */
   job: {

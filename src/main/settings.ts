@@ -20,7 +20,13 @@ const DEFAULTS: AppSettings = {
   asrModel: '',
   voiceName: 'Kore',
   speechRate: 'normal',
-  preferSystemVoices: false
+  preferSystemVoices: false,
+  // V2 (D11): padrão do algoritmo, mas o aluno pode escolher (0,70–0,97).
+  retention: 0.9,
+  // V2: convite opcional — desligado até o aluno pedir.
+  reminderEnabled: false,
+  reminderDays: [1, 3, 5],
+  reminderTime: 19 * 60
 }
 
 const SETTINGS_KEY = 'settings'

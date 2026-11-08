@@ -109,6 +109,8 @@ export type RuntimeTextKey =
   | 'voice.label.tts'
   | 'voice.label.asr'
   | 'voice.label.score'
+  | 'reminder.title'
+  | 'reminder.body'
   | 'job.lesson'
   | 'job.exercises'
   | 'job.curriculum'
@@ -193,6 +195,8 @@ const PT_BR: Templates = {
   'voice.label.tts': 'gerando áudio da frase',
   'voice.label.asr': 'transcrevendo sua fala',
   'voice.label.score': 'calculando o score de pronúncia',
+  'reminder.title': 'Tem revisão esperando',
+  'reminder.body': '{count} card(s) vencidos, quando você quiser. Sem pressa.',
   'job.lesson': 'gerando o conteúdo da lição',
   'job.exercises': 'gerando os exercícios',
   'job.curriculum': 'montando o currículo',
@@ -306,6 +310,8 @@ const EN: Templates = {
   'voice.label.tts': 'generating the sentence audio',
   'voice.label.asr': 'transcribing your speech',
   'voice.label.score': 'scoring the pronunciation',
+  'reminder.title': 'Review is waiting',
+  'reminder.body': '{count} due card(s), whenever you feel like it. No rush.',
   'job.lesson': 'generating the lesson content',
   'job.exercises': 'generating the exercises',
   'job.curriculum': 'building the curriculum',
@@ -419,6 +425,8 @@ const ES: Templates = {
   'voice.label.tts': 'generando el audio de la frase',
   'voice.label.asr': 'transcribiendo tu habla',
   'voice.label.score': 'calculando la puntuación de pronunciación',
+  'reminder.title': 'Hay repaso esperando',
+  'reminder.body': '{count} ficha(s) vencida(s), cuando quieras. Sin prisa.',
   'job.lesson': 'generando el contenido de la lección',
   'job.exercises': 'generando los ejercicios',
   'job.curriculum': 'creando el plan de estudios',
@@ -532,6 +540,8 @@ const FR: Templates = {
   'voice.label.tts': "génération de l'audio de la phrase",
   'voice.label.asr': "transcription de votre parole",
   'voice.label.score': "calcul du score de prononciation",
+  'reminder.title': 'Une révision vous attend',
+  'reminder.body': '{count} carte(s) due(s), quand vous voulez. Sans hâte.',
   'job.lesson': "génération du contenu de la leçon",
   'job.exercises': 'génération des exercices',
   'job.curriculum': 'élaboration du programme',

@@ -372,6 +372,9 @@ export default function App(): JSX.Element {
             languages={languages}
             profile={profileState.profile}
             onChanged={setSettings}
+            onProfileChanged={() => {
+              void window.api.learning.profile.get().then(setProfileState).catch(() => undefined)
+            }}
             onMemoryReset={(state) => {
               // Perfil novo, onboarding do zero: limpa o que estava em aberto.
               setProfileState(state)

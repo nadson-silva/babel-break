@@ -16,12 +16,14 @@ import type {
 import {
   applyRating,
   cardDedupeKey,
+  ratingValue,
   cardHint,
   dueLabel,
   errorCard,
   freshSchedule,
   fullSchedule,
   phraseCard,
+  normalizeRetention,
   previewIntervals,
   vocabCard,
   type CardPayload
@@ -29,6 +31,7 @@ import {
 import { recurringErrors } from './notebook'
 import { localeFor, nativeLangFor } from './locale'
 import { getDb, schema } from './db'
+import { getSettings } from './settings'
 
 type CardRow = typeof schema.cards.$inferSelect
 
@@ -52,7 +55,7 @@ function toView(row: CardRow, now = Date.now()): CardView {
     dueLabel: dueLabel(row.due, now, lang),
     reps: row.reps,
     lapses: row.lapses,
-    intervals: previewIntervals(row.schedule, new Date(now), lang)
+    intervals: previewIntervals(row.schedule, new Date(now), lang, retention())
   }
 }
 
@@ -239,7 +242,7 @@ export function answerReview(profileId: number, cardId: number, rating: ReviewRa
   if (!card) throw new Error('Card não encontrado.')
 
   const now = new Date()
-  const outcome = applyRating(card.schedule, rating, now)
+  const outcome = applyRating(card.schedule, rating, now, retention())
 
   db.transaction((tx) => {
     tx.update(schema.cards)
@@ -257,7 +260,7 @@ export function answerReview(profileId: number, cardId: number, rating: ReviewRa
       .run()
 
     tx.insert(schema.reviews)
-      .values({ cardId, rating: ratingOf(rating), reviewedAt: now.getTime() })
+      .values({ cardId, rating: ratingValue(rating), reviewedAt: now.getTime() })
       .run()
   })
 
@@ -277,15 +280,7 @@ export function answerReview(profileId: number, cardId: number, rating: ReviewRa
   }
 }
 
-function ratingOf(rating: ReviewRating): number {
-  switch (rating) {
-    case 'again':
-      return 1
-    case 'hard':
-      return 2
-    case 'good':
-      return 3
-    default:
-      return 4
-  }
+/** V2 (D11): retenção do FSRS é preferência do aluno (0,70–0,97). */
+function retention(): number {
+  return normalizeRetention(getSettings().retention)
 }

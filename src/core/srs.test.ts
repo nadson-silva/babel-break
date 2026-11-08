@@ -1,12 +1,19 @@
 import { describe, expect, it } from 'vitest'
+import { Rating, State } from 'ts-fsrs'
 import {
+  DEFAULT_REQUEST_RETENTION,
+  MAX_REQUEST_RETENTION,
+  MIN_REQUEST_RETENTION,
   applyRating,
+  newStateName,
+  ratingValue,
   cardDedupeKey,
   cardHint,
   freshSchedule,
   dueLabel,
   errorCard,
   fullSchedule,
+  normalizeRetention,
   parseSchedule,
   previewIntervals,
   vocabCard,
@@ -107,6 +114,63 @@ describe('cards por idioma (M4)', () => {
 
     const vocab = vocabCard({ term: 'ship', translation: 'enviar', example: 'Release today.' }, null, ja)
     expect(vocab.hint).toContain('Diga o termo em japonês')
+  })
+})
+
+describe('retenção e enums do FSRS (v2/D11)', () => {
+  const now = new Date('2026-11-07T10:00:00Z')
+
+  /** Intervalo de um card já consolidado: o primeiro "bom" de card novo cai no
+   * passo de aprendizagem (10 min), que não depende da retenção pedida. */
+  function reviewInterval(retention: number): number {
+    let outcome = applyRating(fullSchedule(freshSchedule(now)).schedule, 'good', now, retention)
+    for (let step = 0; step < 3; step += 1) {
+      outcome = applyRating(outcome.schedule, 'good', new Date(outcome.due + 60_000), retention)
+    }
+    return outcome.intervalMs
+  }
+
+  it('retenção menor espaça mais (é a conta que a UI promete)', () => {
+    expect(reviewInterval(0.75)).toBeGreaterThan(reviewInterval(0.97))
+  })
+
+  it('o padrão do app é 0,9, e valor fora do intervalo é recortado', () => {
+    expect(DEFAULT_REQUEST_RETENTION).toBe(0.9)
+    expect(normalizeRetention(undefined)).toBe(0.9)
+    expect(normalizeRetention(Number.NaN)).toBe(0.9)
+    expect(normalizeRetention(0.1)).toBe(MIN_REQUEST_RETENTION)
+    expect(normalizeRetention(0.99)).toBe(MAX_REQUEST_RETENTION)
+  })
+
+  it('a nota da revisão é valor do enum, não número solto no main', () => {
+    expect(ratingValue('again')).toBe(Rating.Again)
+    expect(ratingValue('hard')).toBe(Rating.Hard)
+    expect(ratingValue('good')).toBe(Rating.Good)
+    expect(ratingValue('easy')).toBe(Rating.Easy)
+  })
+
+  it('estado salvo como número, nome ou lixo sobrevive ao round-trip', () => {
+    expect(newStateName(State.Review)).toBe('review')
+    expect(newStateName(State.Relearning)).toBe('relearning')
+
+    const fromNumber = parseSchedule(JSON.stringify({ state: 2, due: now.toISOString() }), now)
+    expect(fromNumber.state).toBe(State.Review)
+
+    const fromName = parseSchedule(JSON.stringify({ state: 'relearning', due: now.toISOString() }), now)
+    expect(fromName.state).toBe(State.Relearning)
+
+    // Estado que o pacote não conhece (versão futura, dado podre) = new, não crash.
+    expect(parseSchedule(JSON.stringify({ state: 99, due: now.toISOString() }), now).state).toBe(State.New)
+  })
+
+  it('preview dos quatro botões usa a mesma retenção do agendamento', () => {
+    const schedule = fullSchedule(freshSchedule(now))
+    const lazy = previewIntervals(schedule.schedule, now, 'en', 0.8)
+    const picky = previewIntervals(schedule.schedule, now, 'en', 0.97)
+    expect(lazy.map((entry) => entry.rating)).toEqual(['again', 'hard', 'good', 'easy'])
+    const goodLazy = lazy.find((entry) => entry.rating === 'good')?.minutes ?? 0
+    const goodPicky = picky.find((entry) => entry.rating === 'good')?.minutes ?? 0
+    expect(goodLazy).toBeGreaterThanOrEqual(goodPicky)
   })
 })
 

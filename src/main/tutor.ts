@@ -707,21 +707,27 @@ function skillEstimates(profileId: number): { skill: SkillId; estimate: number; 
 }
 
 /**
- * Reestimativa de nível a partir das habilidades. Conservadora: só mexe com
- * confiança acumulada e sobe/desce um degrau por vez. Persiste no perfil.
+ * Reestimativa de nível a partir das habilidades (v2/D10): média ponderada por
+ * confiança, mínimo de habilidades concordando e banda morta na fronteira — o
+ * nível não pode mais ficar alternando a cada lição. Persiste no perfil.
  */
 export function applyReestimation(profileId: number): { from: CefrLevel; to: CefrLevel } | null {
   const profile = profileOf(profileId)
   const current = clampLevel(profile.cefr)
-  const suggestion = reestimateLevel(skillEstimates(profileId), current)
+  const suggestion = reestimateLevel({ skills: skillEstimates(profileId), current })
 
   if (!suggestion || suggestion.cefr === current) return null
+  if (suggestion.reason !== 'up' && suggestion.reason !== 'down') return null
 
   getDb()
     .update(schema.profiles)
     .set({ cefr: suggestion.cefr })
     .where(eq(schema.profiles.id, profileId))
     .run()
+
+  console.info(
+    `[adapt] nível ${current} → ${suggestion.cefr} (média ${suggestion.average.toFixed(2)}, confiança ${suggestion.confidence.toFixed(2)})`
+  )
 
   return { from: current, to: suggestion.cefr }
 }

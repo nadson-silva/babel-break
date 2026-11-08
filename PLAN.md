@@ -231,7 +231,7 @@ Configurações (provedor, modelo por papel, estilo de correção, mix de foco, 
 | **M4 — internacionalização** (3–5 d) | parametrização de prompts, escolha de idioma no onboarding, abstração da correção (IA vs banco manual), suporte a RTL/CJK, i18n da interface | app ensina qualquer idioma via IA, com interface traduzível | ✅ concluído |
 | **M5 — produto** (3–5 d) | dashboard, pré-geração/cache, comportamento offline, botão de reportar conteúdo ruim, empacotamento, script de eval | AppImage instalável, usável em qualquer ritmo | ✅ concluído |
 | **M6 — pré-v2** (3–5 d) | rede de proteção (startup + log + CI), bugs do loop, mutex de geração, timeout/backoff, `schemaVersion`, FK e índices, validação na fronteira IPC | revisão não pula card; fechar conversa A não encerra B; nenhum request de IA sem deadline; banco sobrevive a migração falha com backup; `npm run eval` com gate de regressão | ✅ aplicado 2026-11-07 (Lotes 0 e 1; E9 e parte de C9 adiadas — ver notas) |
-| **v2** | TTS + entrada de voz + score de pronúncia, múltiplos perfis, export/import | — | depende do M6 |
+| **V2 — voz, perfis, backup** (8–12 d) | TTS + entrada de voz + score de pronúncia sobre jobs nomeados (E9); múltiplos perfis com escopo por `profileId`; export/import versionado; D10/D11; lembrete opt-in; verificação de versão; modelos por papel | aluno fala e ouve em qualquer idioma com provedor de voz; dois perfis no mesmo aparelho não vazam um para o outro; `data:export` → `data:import` reconstrói o perfil com ids novos recusando dump de versão divergente ou com linha órfã | ✅ aplicada 2026-11-07 (Lotes 2 e 3 — ver notas; Win/mac seguem sem validação) |
 
 Notas do que ficou pronto no M2: `core/interference.ts` (banco PT-BR com 30 pares, correção
 determinística offline), `core/srs.ts` + `ts-fsrs` (cards por template e agendamento FSRS),
@@ -420,25 +420,95 @@ leitura tolerante de JSON, e a degradação honesta para idioma ≠ inglês.
       electron-updater com o repositório **certo** — hoje `release/app-update.yml` aponta para
       `babel-break`; `.deb` com `libgtk-3-0t64`.
 
+### Notas do que ficou pronto na V2 (2026-11-07)
+
+**Voz (`core/audio.ts`, `core/pronunciation.ts`, `core/voice.ts`, `main/voice.ts`,
+`main/jobs.ts`)**
+- TTS e ASR no provedor: Gemini sintetiza (30 vozes prebuilt, modelos `*-tts`) e
+  transcreve; Ollama não tem voz e a UI diz isso em vez de dar nota falsa. Áudio
+  do microfone sai como **WAV PCM16 mono 16 kHz** (Web Audio no renderer, sem
+  dependência nova) e o PCM cru do provedor chega embrulhado em WAV.
+- Score de pronúncia **determinístico**: alinhamento LCS entre frase-alvo e
+  transcrição, crédito parcial por palavra quase certa, tags `pronunciation`/
+  `missing-words`/`extra-words`, confiança que cai em frase curta. A transcrição
+  aparece na tela — o aluno discorda com o texto na frente, não com uma nota mágica.
+- Cache de áudio em SQLite (`audio_cache`, chave determinística idioma+voz+modelo+
+  texto, LRU de 240 clipes por perfil): a mesma frase é sintetizada uma vez e
+  funciona offline, igual ao cache de lição do M5.
+- Skills `listening`/`speaking` deixaram de ser linha morta: novos tipos
+  `listen_repeat`/`speak_sentence` (com caminho determinístico no fallback para
+  qualquer idioma cujo conteúdo exista) alimentam `attempts` + `speech_runs` +
+  `blendSkill` na mesma escala.
+- **E9 entregue junto**: `main/jobs.ts` é o padrão do `curriculumJob` generalizado —
+  job nomeado com `label` no idioma do aluno, progresso, cancelamento por id, por
+  perfil e na troca de perfil, deadline somado ao `AbortSignal`. Geração de lição,
+  currículo, esboço de trilha e voz rodam como jobs; `job:event` no push canal.
+- Empacotamento/permissões: handler de `media` só para origem local no main, CSP com
+  `media-src 'self' data: blob:`.
+
+**Perfis (`main/profiles.ts`, `main/scope.ts`, tela `ProfilesScreen`)**
+- Perfil ativo é ponteiro explícito em `settings` (`activeProfile`), lido a cada
+  chamada; `getDefaultProfile()` (o "primeiro perfil da tabela") não existe mais.
+- `lessons.profile_id` (migração 0007, com backfill da cadeia unidade/trilha) é a
+  coluna de escopo; `scope.ts` resolve posse de lição/exercício/card/erro/trilha/
+  conversa na mesma consulta. Id de outro perfil é `não encontrado`, nunca dado alheio.
+- Escopo aplicado nos buracos que a auditoria marcou: `lesson:finish`,
+  `notebook:resolve`, `scenario:open/refresh`, alvos de `report:*` (inclusive no
+  undo), `tutor:new` com `lessonId`, leitura de mensagens antes da validação da
+  conversa em `closeConversation`, agregações do painel (`lessonBlock`,
+  `reviewTimes`, `scenarioBlock`, `cacheStats`) que liam a tabela inteira.
+- `deleteProfile` limpa as tabelas sem FK cascade numa transação; apagar o último
+  perfil deixa um perfil limpo (nunca zero). Trocar de perfil cancela stream e jobs.
+- Canais `profile:list/switch/create/update/delete` com contrato, seletor na sidebar,
+  tela de perfis com nome/cor/memória de cada aluno; onboarding por perfil.
+
+**Backup (`core/portable.ts`, `main/portable.ts`, `DataScreen`)**
+- Envelope com `app`+`format`+`schemaVersion`+`promptVersion`+`dbVersion`, validação
+  zod, fechamento referencial **dentro do arquivo** e recusa de dump que mistura
+  perfis. Versão divergente = rejeição com mensagem, não shim (D1).
+- Import cria perfil novo com ids remapeados — inclusive os que moram dentro de
+  JSON (`cards.content.lessonId`, `study_sessions.summary`) — e sessão guiada
+  inacabada de outra máquina entra encerrada. `settings`, provedor e chave nunca
+  viajam. Exportar é sempre decisão do usuário (o IPC não aceita caminho arbitrário).
+
+**Dívidas quitadas**
+- **D10**: reestimativa com média ponderada por confiança, mínimo de duas
+  habilidades concordando e **banda morta** na fronteira do CEFR (A2↔B1 não alterna
+  mais); teto C1 documentado (C2 não existe no plano).
+- **D11**: `request_retention` do FSRS virou preferência (0,70–0,97) e o scheduler
+  é memoizado por valor; leitura de `state`/`rating` sem suposição de ordem do enum
+  (mapa derivado do próprio enum), com `ratingValue` único no main.
+- **D7**: `core/score.ts` — 0–1 no que é persistido, 0–5 só na estimativa; voz entra
+  pela mesma régua, sem `score * 5` solto pelo código.
+- **Lembrete opt-in** (§11/§14): `core/reminders.ts` puro (dias, hora, uma janela =
+  um disparo, nada sem fila vencida) + `main/reminders.ts` com `Notification`,
+  `reminder:get/update/test` e UI. Desligado por padrão.
+- **Modelos por papel** (§3): `quick`/`strong` (+ `tts`/`asr`) resolvidos em
+  `ai.modelForRole`; correção e resumo rodam no rápido, geração no forte.
+- **F5**: verificação de versão no GitHub Releases (`core/update.ts`,
+  `main/updater.ts`) com link — nada de instalar pelas costas do aluno;
+  `publish: null` continua até haver pipeline de assinatura.
+- **D8**: `UI_LANGUAGES` em `shared/` e teste cruzado com `RUNTIME_TEXT_LANGUAGES`
+  (a UI não pode oferecer idioma cujo texto de runtime o main não escreve).
+
+**O que a V2 não entrega** (explícito, para não virar lenda): validação em
+Windows/macOS, auto-update que instala sozinho, RAG/dicionários de pronúncia
+fonêmica (o score compara texto, não som), e C9 completo (agregações do painel
+ainda leem algumas tabelas por junção de unidade/trilha).
+
 ### Lote 2 — a v2 sobre base sólida
 
-- [ ] **Voz**: TTS + ASR + score de pronúncia, sobre **jobs nomeados com eventos de progresso e
-      cancelamento** (E9); skills `listening`/`speaking` deixando de ser linhas mortas — hoje
-      `blendSkill` só roda para `grammar`/`vocab` (`learning.ts:1100-1101`) e
-      `speaking`/`writing` (`scenario.ts:428-429`); escala de score única (D7); CSP/`connect-src`
-      e permissão de microfone no empacotamento.
-- [ ] **Múltiplos perfis**: canais `profile:create/switch/delete` (não existe nenhum entre os 57);
-      **todo handler escopado por `profileId`** (Lote 0 D2); `activeProfile` explícito, nunca
-      singleton de módulo.
-- [ ] **Export/import**: sobre `schemaVersion` (D1) e FK (C5) — dump sem versão não é compatível,
-      e linhas órfãs exportam perfil corrompido.
-- [ ] **Pendências de v1 assumidas no plano**: lembretes opt-in (§11 e §14 — `grep reminder src/` é 0),
-      modelo por papel (§3, notas de implementação: só `geminiModel`/`ollamaModel` hoje),
-      auto-update com repositório correto (F5), Win/mac validados, `libgtk-3-0t64`, i18n
-      compartilhado entre main e `runtime-text` (D8).
-- [ ] **D10** reestimativa com peso por confiança, mínimo de amostras e banda morta nos bins do
-      CEFR (`adapt.ts:111-143` — hoje A2↔B1 fica alternando; `C2` não existe em lugar nenhum);
-      **D11** `request_retention` no FSRS e fim das suposições de enum do ts-fsrs (`srs.ts:42,186`).
+- [x] **Voz**: TTS + ASR + score de pronúncia sobre jobs nomeados (E9), `listening`/`speaking`
+      vivos, escala única (D7), CSP `media-src` e permissão de microfone. → V2, 2026-11-07
+- [x] **Múltiplos perfis**: `profile:list/create/switch/update/delete`, todo handler escopado
+      por `profileId`, `activeProfile` explícito. → V2, 2026-11-07
+- [x] **Export/import**: envelope versionado, recusa de órfãos, ids remapeados. → V2, 2026-11-07
+- [x] **Pendências de v1**: lembretes opt-in (§11/§14), modelos por papel (§3), verificação de
+      versão com link (F5), `libgtk-3-0t64`, i18n compartilhado entre main e `runtime-text` (D8).
+      **Win/mac seguem sem validação** (nada foi testado fora de Linux). → V2, 2026-11-07
+- [x] **D10** reestimativa ponderada por confiança com mínimo de amostras e banda morta nos bins
+      do CEFR; **D11** `request_retention` no FSRS e leitura de enum sem suposição de ordem.
+      → V2, 2026-11-07
 
 ### Critérios de aceite do M6 (para a v2 começar) — status 2026-11-07
 

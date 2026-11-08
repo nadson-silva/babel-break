@@ -43,6 +43,25 @@ export const shell = { openExternal: (): void => undefined }
 export const safeStorage = { isEncryptionAvailable: (): boolean => false }
 
 /**
+ * V2: o lembrete usa Notification do desktop. Nos testes nada é mostrado — o
+ * stub se comporta como um sistema sem notificação, que é o caminho que o
+ * reminder tem que tolerar.
+ */
+export class Notification {
+  static isSupported(): boolean {
+    return false
+  }
+
+  on(): this {
+    return this
+  }
+
+  show(): void {
+    // nada
+  }
+}
+
+/**
  * V2: o processo main usa os diálogos de salvar/abrir arquivo (export/import).
  * Nos testes nada abre janela — os caminhos são passados explicitamente, e o
  * stub só precisa existir para o import nomeado não quebrar.

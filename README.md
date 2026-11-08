@@ -106,9 +106,47 @@ API). Sem sessão diária, streak ou meta obrigatória — você estuda quando q
 **M6 (pré-v2) aplicada em 2026-11-07** — rede de proteção (boot com recuperação de banco,
 log rotativo, ErrorBoundary, CI com gate de eval), bugs do loop (fila de revisão, fechamento de
 conversa, mutex de geração, timeout/backoff em toda chamada de IA), contratos versionados
-(`promptVersion`/`schemaVersion`, zod nos 57 canais IPC, FK + índices). Pendências honestas
-registradas no [PLAN §12](./PLAN.md). Próximo: **v2** — voz (TTS + pronúncia), múltiplos perfis,
-export/import.
+(`promptVersion`/`schemaVersion`, zod em todos os canais IPC, FK + índices). Pendências honestas
+registradas no [PLAN §12](./PLAN.md).
+
+**V2 aplicada em 2026-11-07** — voz, múltiplos perfis e backup portável:
+
+- [x] **Prática de voz**: ouvir a frase (TTS do provedor, com voz do sistema como reserva),
+      repetir no microfone e receber **score de pronúncia** palavra por palavra — a nota vem do
+      alinhamento entre a frase-alvo e a transcrição, e o que o app ouviu aparece na tela
+- [x] Novo tipo de exercício de escuta (`listen_repeat`) e de fala (`speak_sentence`), com
+      caminho determinístico (funciona em qualquer idioma cujo conteúdo exista)
+- [x] `listening`/`speaking` alimentam o painel de Progresso na mesma escala do resto
+- [x] Áudio sintetizado fica em cache no SQLite: a mesma frase na mesma voz não regasta token
+- [x] **Geração longa virou job nomeado**: progresso com rótulo, cancelamento na tela e no
+      trocar de perfil, deadline em tudo (lição, currículo, trilha, voz)
+- [x] **Múltiplos perfis**: cada aluno com idioma, caderno, SRS, conversas e progresso próprios,
+      seletor na sidebar, e toda fronteira IPC validando posse (`profile:list/switch/create/update/delete`)
+- [x] **Backup portável** por perfil: arquivo JSON com carimbo de versão, conferido antes de
+      escrever, importado como perfil novo com ids remapeados (chave do Gemini nunca viaja)
+- [x] **Lembrete opcional** (dias + horário, só com revisão vencida de verdade) — continua sem
+      streak, meta ou culpa
+- [x] Modelos **por papel** (rápido para corrigir, forte para gerar, modelo e voz de TTS/ASR) e
+      retenção do FSRS configurável
+- [x] **Verificação de versão**: o app avisa quando existe release nova e abre o download — não
+      se atualiza sozinho
+- [ ] Windows/macOS seguem sem validação (tudo acima foi construído e testado em Linux)
+
+## Voz e pronúncia (V2)
+
+A voz depende do provedor, e o app diz qual metade existe em cada caso:
+
+| Provedor | Ouvir a frase | Falar e ser pontuado |
+| --- | --- | --- |
+| **Gemini** | ✅ TTS (`gemini-2.5-flash-preview-tts`, 30 vozes) | ✅ transcrição + score de pronúncia |
+| **Ollama** | ⚠️ voz do sistema (se o SO tiver vozes) | ❌ sem ASR — nada de nota inventada |
+
+Como funciona o score: o áudio sai do navegador como **WAV PCM16 mono 16 kHz**, o provedor
+transcreve, e `core/pronunciation.ts` alinha a transcrição com a frase-alvo (respeitando a
+escrita do idioma: espaço, CJK com `Intl.Segmenter`, RTL, diacríticos que definem a palavra).
+Palavra quase certa recebe crédito parcial; a confiança cai em frase curta; a transcrição
+aparece na tela para você discordar com o texto na frente. Tudo determinístico e testável — a IA
+só converte som em texto, quem dá a nota é o app.
 
 ## Rede de proteção da M6 (auditoria → correção)
 
@@ -306,7 +344,9 @@ Em sessões sem portal/keyring, o armazenamento seguro degrada com aviso visíve
 ```
 src/
   main/            processo principal (Electron)
-    db/            schema Drizzle, init e migrações
+    db/            schema Drizzle, init, migrações e handle cru (export/import)
+    profiles.ts    V2: ponteiro de perfil ativo, CRUD e cascata de apagar
+    scope.ts       V2: posse de lição/exercício/card/erro/trilha/conversa numa consulta
     providers/     adaptadores Gemini e Ollama
     ai.ts          geração estruturada (JSON + validação zod)
     learning.ts    onboarding, nivelamento, currículo, lições e progresso
@@ -319,6 +359,12 @@ src/
     prewarm.ts     fila ociosa de pré-geração + estatísticas de cache
     provider-status.ts sonda de disponibilidade da IA (banner offline)
     events.ts      barramento interno (learning → prewarm) sem ciclo de imports
+    jobs.ts        V2 (E9): jobs nomeados com progresso, cancelamento e deadline
+    jobs-ipc.ts    V2: listar/cancelar jobs pelo renderer
+    voice.ts       V2: TTS com cache, ASR + score, ditado, frases da prática e histórico
+    portable.ts    V2: dump/restore de perfil com ids remapeados
+    reminders.ts   V2: lembrete opt-in (Notification, uma janela = um disparo)
+    updater.ts     V2: checagem de versão no GitHub Releases (informa, não instala)
     tracks.ts      trilhas de foco: esboço → revisão → aprovação → lições da trilha
     scenario.ts    modo cenário: persona do roleplay e rubrica de tarefa × língua
     locale.ts      par de idiomas do perfil → regras do banco, prompts e tokenização
@@ -342,16 +388,26 @@ src/
     dashboard.ts      aritmética pura do painel (dias com prática, janelas, retenção)
     reports.ts        taxonomia e efeitos dos reports de conteúdo ruim
     runtime-text.ts   texto de runtime do main no idioma do aluno (cards, intervalos, recap)
+    audio.ts          V2: WAV escrito à mão, leitura de cabeçalho, chave do cache de áudio
+    pronunciation.ts  V2: score de pronúncia por alinhamento LCS (crédito parcial, confiança)
+    voice.ts          V2: catálogo de vozes do provedor + instruções de TTS/ASR
+    score.ts          V2 (D7): escala única — 0–1 persistido, 0–5 na estimativa
+    portable.ts       V2: formato do backup (carimbo de versão, fechamento referencial, recusas)
+    reminders.ts      V2: aritmética de calendário do lembrete opcional
+    update.ts         V2: comparação de semver e leitura da release
   preload/         bridge segura para o renderer
   renderer/        React + Tailwind (UI PT-BR / EN via `i18n/`)
     i18n/          dicionários pt-BR.ts e en.ts + registro com troca em runtime (teste de paridade)
     lang.ts        idioma-alvo em runtime: rótulos {lang}/{native}/{pair} e dir/lang
-    screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Progresso, Sessão guiada, Configurações
+    screens/       Home, Aulas, Trilhas, Lição, Tutor, Revisão, Caderno, Progresso, Sessão guiada,
+                   Configurações, Voz, Perfis, Backup
     components/    ExercisePlayer, ReviewQueue, TutorPanel, ScenarioPanel, CorrectionList, ReportButton,
-                   AiStatus, Sidebar, TargetText
-    lib/           format.ts (tamanho de banco, decimal regional)
+                   AiStatus, Sidebar, TargetText, SpeechControls, ProfileAvatar
+    lib/           format.ts (tamanho de banco, decimal regional), audio.ts (gravar/decodificar WAV,
+                   voz do sistema), jobs.ts (progresso de job + cancelar), palette.ts (cor do avatar)
   shared/          tipos compartilhados entre main e renderer
                    report-reasons.ts (taxonomia de report: menu do renderer = efeito do main)
+                   i18n-languages.ts (V2/D8: idiomas da UI, checados contra os de runtime)
 test/              stub do Electron para os testes de integração do processo main
 scripts/eval.mjs   harness manual de qualidade de IA, por idioma
 electron-builder.yml  empacotamento AppImage/.deb; build/icon.svg → ícones

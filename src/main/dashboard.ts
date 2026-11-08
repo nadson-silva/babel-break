@@ -25,7 +25,7 @@ import type {
 } from '../shared/types'
 import { average, passRateFromReviews, roundedAverage, summarizeTime, toPercent } from '../core/dashboard'
 import type { CardPayload } from '../core/srs'
-import { cardRetention } from '../core/srs'
+import { cardRetention, normalizeRetention } from '../core/srs'
 import { getDb, schema } from './db'
 import { activeProfileId, profileViewOf } from './profiles'
 
@@ -33,6 +33,7 @@ import { activeTrackViews } from './tracks'
 import { reportsSummary } from './reports'
 import { cacheStats } from './prewarm'
 import { providerStatus } from './provider-status'
+import { getSettings } from './settings'
 
 const KINDS: StudyKind[] = ['lesson', 'conversation', 'guided', 'review']
 
@@ -191,7 +192,7 @@ function vocabularyBlock(profileId: number, now: number): DashboardView['vocabul
         reps: row.reps,
         lapses: row.lapses,
         stability: row.stability ?? 0,
-        retention: cardRetention(row.schedule, new Date(now))
+        retention: cardRetention(row.schedule, new Date(now), normalizeRetention(getSettings().retention))
       }
     })
     .filter((entry) => entry.retention != null && entry.term.trim().length > 0)

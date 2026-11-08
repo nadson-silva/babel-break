@@ -4,6 +4,7 @@ import path from 'node:path'
 import { closeDatabase, initDatabase } from './db'
 import { emitStudentEvent } from './events'
 import { registerIpcHandlers } from './ipc'
+import { startReminderWatch, stopReminderWatch } from './reminders'
 import { initLogging } from './log'
 import { startPrewarmWatch, stopPrewarmWatch } from './prewarm'
 import { startProviderWatch, stopProviderWatch } from './provider-status'
@@ -130,6 +131,8 @@ function bootstrap(): void {
   // pré-geração. Os dois são supérfluos se o app fechar — nada bloqueia o quit.
   startProviderWatch()
   startPrewarmWatch()
+  // V2: lembrete opt-in (não dispara nada enquanto `reminderEnabled` for false).
+  startReminderWatch()
   emitStudentEvent('app-ready')
 
   app.on('activate', () => {
@@ -157,6 +160,7 @@ if (!gotLock) {
   app.on('before-quit', () => {
     stopProviderWatch()
     stopPrewarmWatch()
+    stopReminderWatch()
     closeDatabase()
   })
 }

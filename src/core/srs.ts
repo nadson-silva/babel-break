@@ -39,7 +39,32 @@ const RATING_BY_REVIEW: Record<ReviewRating, Grade> = {
   easy: Rating.Easy
 }
 
-const scheduler = fsrs()
+/**
+ * V2 (D11): retenção pedida ao FSRS é decisão do aluno, não constante do pacote.
+ *
+ * 0,9 é o padrão do algoritmo; quem tem muita fila costuma baixar para 0,85 e
+ * receber intervalos maiores. O scheduler é memoizado por valor — criar um `fsrs()`
+ * por chamada custaria alocação em toda revisão.
+ */
+export const DEFAULT_REQUEST_RETENTION = 0.9
+export const MIN_REQUEST_RETENTION = 0.7
+export const MAX_REQUEST_RETENTION = 0.97
+
+const schedulers = new Map<number, ReturnType<typeof fsrs>>()
+
+export function normalizeRetention(value: number | null | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_REQUEST_RETENTION
+  return Math.min(MAX_REQUEST_RETENTION, Math.max(MIN_REQUEST_RETENTION, value))
+}
+
+function schedulerFor(requestRetention: number): ReturnType<typeof fsrs> {
+  const retention = normalizeRetention(requestRetention)
+  const cached = schedulers.get(retention)
+  if (cached) return cached
+  const created = fsrs({ request_retention: retention })
+  schedulers.set(retention, created)
+  return created
+}
 
 export function vocabCard(
   item: { term: string; translation: string; example: string },
@@ -175,23 +200,54 @@ export interface StoredSchedule {
 
 export type CardState = 'new' | 'learning' | 'review' | 'relearning'
 
+/** Nome do estado para as colunas espelhadas do SQLite (fonte: o enum, não string). */
 export function newStateName(state: State): CardState {
-  if (state === State.Review) return 'review'
-  if (state === State.Relearning) return 'relearning'
-  if (state === State.Learning) return 'learning'
-  return 'new'
+  const name = stateNameOf(state)
+  return name === 'review' || name === 'relearning' || name === 'learning' ? name : 'new'
 }
 
+/**
+ * V2 (D11): estado FSRS lido sem suposição de ordem. A versão anterior indexava
+ * um array posicional (`[New, Learning, Review, Relearning][n]`), que quebra no
+ * dia que o pacote reordena ou insere um estado. Aqui o nome vem do próprio enum.
+ */
+// `State`/`Rating` do ts-fsrs são objetos `{ New: 0, Learning: 1, … }` sem
+// mapa reverso: os nomes vêm das chaves cujo valor é número.
+const STATE_NAMES_BY_VALUE = new Map<number, string>(
+  Object.entries(State).flatMap(([key, value]) =>
+    typeof value === 'number' ? ([[value, key.toLowerCase()]] as [number, string][]) : []
+  )
+)
+
+const RATING_VALUES = RATING_BY_NAME()
+
+function RATING_BY_NAME(): Record<ReviewRating, Grade> {
+  return {
+    again: Rating.Again,
+    hard: Rating.Hard,
+    good: Rating.Good,
+    easy: Rating.Easy
+  }
+}
+
+/** Valor numérico da nota (mesma fonte do `RATING_BY_REVIEW`, sem número solto). */
+export function ratingValue(rating: ReviewRating): number {
+  return RATING_VALUES[rating]
+}
+
+function stateNameOf(value: unknown): string | null {
+  if (typeof value === 'number') return STATE_NAMES_BY_VALUE.get(value) ?? null
+  if (typeof value === 'string') return value.toLowerCase()
+  return null
+}
+
+/** Reconstrói o estado do FSRS a partir do que está salvo (número ou nome). */
 function toState(value: CardState | string | number | null | undefined): State {
-  const name = typeof value === 'number' ? [State.New, State.Learning, State.Review, State.Relearning][value] : value
-  switch (name) {
-    case State.Review:
+  switch (stateNameOf(value)) {
     case 'review':
       return State.Review
-    case State.Relearning:
     case 'relearning':
       return State.Relearning
-    case State.Learning:
     case 'learning':
       return State.Learning
     default:
@@ -264,9 +320,14 @@ export interface ReviewOutcome extends StoredSchedule {
 }
 
 /** Aplica uma nota do aluno ao card e devolve o novo estado agendado. */
-export function applyRating(json: string | null | undefined, rating: ReviewRating, now = new Date()): ReviewOutcome {
+export function applyRating(
+  json: string | null | undefined,
+  rating: ReviewRating,
+  now = new Date(),
+  requestRetention = DEFAULT_REQUEST_RETENTION
+): ReviewOutcome {
   const card = parseSchedule(json, now)
-  const result = scheduler.next(card, now, RATING_BY_REVIEW[rating])
+  const result = schedulerFor(requestRetention).next(card, now, RATING_BY_REVIEW[rating])
   const next = result.card
 
   return {
@@ -288,12 +349,13 @@ export interface IntervalPreview {
 export function previewIntervals(
   json: string | null | undefined,
   now = new Date(),
-  lang: string | null | undefined = 'pt-BR'
+  lang: string | null | undefined = 'pt-BR',
+  requestRetention = DEFAULT_REQUEST_RETENTION
 ): IntervalPreview[] {
   const card = parseSchedule(json, now)
 
   try {
-    const preview = scheduler.repeat(card, now)
+    const preview = schedulerFor(requestRetention).repeat(card, now)
 
     return (['again', 'hard', 'good', 'easy'] as ReviewRating[]).map((rating) => {
       const next = preview[RATING_BY_REVIEW[rating]].card
@@ -342,13 +404,21 @@ function relative(lang: string | null | undefined, value: string): string {
  * Retenção estimada do card agora (curva de esquecimento do FSRS), usada pelo
  * painel de Progresso. Card novo não tem curva: devolve null, não 0%.
  */
-export function cardRetention(json: string | null | undefined, now = new Date()): number | null {
+/**
+ * Retenção estimada do card (curva do FSRS) com o scheduler da retenção pedida —
+ * painel e fila mostram a mesma conta que o agendamento usou.
+ */
+export function cardRetention(
+  json: string | null | undefined,
+  now = new Date(),
+  requestRetention = DEFAULT_REQUEST_RETENTION
+): number | null {
   const card = parseSchedule(json, now)
   if (card.state === State.New || card.reps === 0 || !card.stability) return null
   if (!card.last_review) return null
 
   try {
-    const value = scheduler.retrievability(card, now)
+    const value = schedulerFor(requestRetention).retrievability(card, now)
     return Number.isFinite(value) && value > 0 ? Math.min(1, Math.max(0, value)) : null
   } catch {
     return null
