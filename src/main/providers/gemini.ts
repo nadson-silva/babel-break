@@ -2,6 +2,7 @@ import { GoogleGenAI, type Part } from '@google/genai'
 import type { ModelInfo, TestResult } from '../../shared/types'
 import { DEFAULT_VOICE, GEMINI_VOICES, asrInstruction, resolveVoice, ttsInstruction } from '../../core/voice'
 import { languageMeta } from '../../core/languages'
+import { geminiLive } from './gemini-live'
 import { getGeminiApiKey } from '../secrets'
 import type {
   GenerateRequest,
@@ -204,6 +205,9 @@ export const geminiProvider: Provider = {
   },
 
   speech: geminiSpeech,
+
+  /** V3: conversa em tempo real (Live API) — mesmo segredo, sessão longa. */
+  live: geminiLive,
 
   async generate(request: GenerateRequest): Promise<string> {
     const ai = await client()

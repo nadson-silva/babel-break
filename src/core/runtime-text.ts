@@ -119,6 +119,7 @@ export type RuntimeTextKey =
   | 'voice.summary.heard'
   | 'voice.summary.noAudio'
   | 'error.voiceUnavailable'
+  | 'error.voiceLiveUnavailable'
   | 'speech.kind.speak'
   | 'speech.kind.listen'
 
@@ -205,6 +206,8 @@ const PT_BR: Templates = {
   'voice.summary.heard': 'O app ouviu: “{transcript}”.',
   'voice.summary.noAudio': 'Não deu para ouvir nada. Fale a frase inteira, sem pressa, e tente de novo.',
   'error.voiceUnavailable': 'Este provedor não tem voz (TTS/ASR). Use um provedor com fala ou a voz do sistema para ouvir.',
+  'error.voiceLiveUnavailable':
+    'A conversa em tempo real precisa de um provedor com voz ao vivo (Gemini). A prática de voz por turnos continua funcionando.',
   'fb.mcTranslation.instruction': 'Escolha a tradução correta.',
   'fb.mcTranslation.prompt': 'O que significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -320,6 +323,8 @@ const EN: Templates = {
   'voice.summary.heard': 'What the app heard: “{transcript}”.',
   'voice.summary.noAudio': 'Nothing could be heard. Say the whole sentence, unhurried, and try again.',
   'error.voiceUnavailable': 'This provider has no voice (TTS/ASR). Use a speech provider or the system voice to listen.',
+  'error.voiceLiveUnavailable':
+    'Real-time conversation needs a live-voice provider (Gemini). Turn-based voice practice still works.',
   'fb.mcTranslation.instruction': 'Choose the correct translation.',
   'fb.mcTranslation.prompt': 'What does “{term}” mean?',
   'fb.mcTranslation.explanation': '“{term}” means “{translation}”.',
@@ -435,6 +440,8 @@ const ES: Templates = {
   'voice.summary.heard': 'La app oyó: “{transcript}”.',
   'voice.summary.noAudio': 'No se pudo oír nada. Di la frase completa, sin prisa, e inténtalo de nuevo.',
   'error.voiceUnavailable': 'Este proveedor no tiene voz (TTS/ASR). Usa un proveedor con habla o la voz del sistema para oír.',
+  'error.voiceLiveUnavailable':
+    'La conversación en tiempo real necesita un proveedor con voz en vivo (Gemini). La práctica de voz por turnos sigue funcionando.',
   'fb.mcTranslation.instruction': 'Elige la traducción correcta.',
   'fb.mcTranslation.prompt': '¿Qué significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -550,7 +557,9 @@ const FR: Templates = {
   'voice.summary.heard': "Ce que l'app a entendu : « {transcript} ».",
   'voice.summary.noAudio': "Rien n'a pu être entendu. Dites la phrase entière, sans hâte, et réessayez.",
   'error.voiceUnavailable': "Ce fournisseur n'a pas de voix (TTS/ASR). Utilisez un fournisseur vocal ou la voix du système pour écouter.",
-  
+  'error.voiceLiveUnavailable':
+    "La conversation en temps réel nécessite un fournisseur avec voix en direct (Gemini). La pratique vocale par tours fonctionne toujours.",
+
   'fb.mcTranslation.instruction': 'Choisissez la traduction correcte.',
   'fb.mcTranslation.prompt': 'Que signifie « {term} » ?',
   'fb.mcTranslation.explanation': '« {term} » signifie « {translation} ».',

@@ -1,4 +1,11 @@
-import type { ChatMessage, ModelInfo, ProviderId, SpeechRate, TestResult } from '../../shared/types'
+import type {
+  ChatMessage,
+  ModelInfo,
+  ProviderId,
+  SpeechRate,
+  TestResult,
+  VoiceLiveTurnMode
+} from '../../shared/types'
 
 export interface StreamRequest {
   model: string
@@ -68,4 +75,81 @@ export interface Provider {
   generate(request: GenerateRequest): Promise<string>
   /** Ausente = provedor sem voz (UI diz isso em vez de girar para sempre). */
   speech?: SpeechCapability
+  /** V3: conversa em tempo real. Ausente = motor sem voz ao vivo (Ollama hoje). */
+  live?: RealtimeCapability
+}
+
+// --- V3: conversa por voz em tempo real --------------------------------------
+
+/**
+ * Evento bruto do motor ao vivo. O contrato **não presume VAD de servidor**:
+ * `userTranscript.partial` pode faltar, e `goAway`/`resumption` só existem na
+ * nuvem — o motor local (Lote 6) fecha turnos por VAD próprio e emite os
+ * mesmos tipos. Quem consome isto é o gerenciador de sessão (`voice-live.ts`),
+ * nunca o renderer.
+ */
+export interface ProviderLiveEvent {
+  type:
+    | 'ready'
+    | 'userTranscript'
+    | 'modelTranscript'
+    | 'audioChunk'
+    | 'turnComplete'
+    | 'interrupted'
+    | 'userActivity'
+    | 'goAway'
+    | 'resumption'
+    | 'error'
+    | 'closed'
+  /** Transcrição (parcial ou final, conforme `partial`). */
+  text?: string
+  partial?: boolean
+  /** PCM16 mono em base64, na taxa `sampleRate` (24 kHz no Gemini). */
+  audioBase64?: string
+  sampleRate?: number
+  /** 'userActivity': o aluno começou (true) ou parou (false) de falar. */
+  active?: boolean
+  /** 'resumption': handle nativo do motor; null = indisponível (usar histórico). */
+  resumptionHandle?: string | null
+  message?: string
+}
+
+export interface LiveStartOptions {
+  model: string
+  voice: string
+  rate: SpeechRate
+  turnMode: VoiceLiveTurnMode
+  /** Instrução de sistema da chamada (montada em `core/prompts.ts`). */
+  systemInstruction: string
+  /** Turnos passados para re-injetar quando não há handle de retomada. */
+  history?: ChatMessage[]
+  /** Retomada nativa do motor (Gemini Live), quando houver. */
+  resumptionHandle?: string | null
+  /** Deadline da CONEXÃO (não da sessão — voz ao vivo não tem 240 s). */
+  signal?: AbortSignal
+}
+
+export interface LiveSessionHandle {
+  /** Frame PCM16 16 kHz em base64 vindo do microfone do aluno. */
+  sendAudio(audioBase64: string): void
+  /** Texto no lugar de áudio (ditado durante a chamada; fecha o turno). */
+  sendText(text: string): void
+  /** Push-to-talk (modo manual): abre/fecha o turno do aluno. */
+  pushToTalk(open: boolean): void
+  /** Interrompe a fala do tutor (no motor local; na nuvem é feito pelo servidor). */
+  interrupt(): void
+  close(): void
+}
+
+export interface RealtimeCapability {
+  /** Identificador estável ('gemini-live' | 'local-sherpa') — selo na UI. */
+  engineId: string
+  liveModels: string[]
+  defaultLiveModel: string
+  voices: string[]
+  defaultVoice: string
+  startLiveSession(
+    options: LiveStartOptions,
+    onEvent: (event: ProviderLiveEvent) => void
+  ): Promise<LiveSessionHandle>
 }

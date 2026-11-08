@@ -113,3 +113,21 @@ export function isPlayableMime(mimeType: string | null | undefined): boolean {
   const lower = mimeType.toLowerCase()
   return lower.startsWith('audio/wav') || lower.startsWith('audio/mp3') || lower.startsWith('audio/mpeg') || lower.startsWith('audio/ogg')
 }
+
+// --- V3: conversa em tempo real ------------------------------------------------
+//
+// O motor ao vivo fala PCM cru, não contêiner: 16 kHz mono na entrada do micro,
+// 24 kHz mono na saída do tutor (formatos do Gemini Live; o motor local do
+// Lote 6 usa os mesmos números para a UI não conhecer diferença).
+
+/** Entrada do microfone no motor ao vivo. */
+export const LIVE_INPUT_MIME = 'audio/pcm;rate=16000'
+export const LIVE_INPUT_SAMPLE_RATE = 16000
+/** Saída padrão do tutor (o mime do chunk pode declarar outra; o UI usa `sampleRate`). */
+export const LIVE_OUTPUT_SAMPLE_RATE = 24000
+
+/** Frames de ~100 ms de PCM16 16 kHz: 3.2 KB crus, ~4.3 KB em base64. */
+export const LIVE_FRAME_BYTES = LIVE_INPUT_SAMPLE_RATE * 2 * (100 / 1000)
+
+/** Teto de um chunk de áudio no IPC (10 s — dez vezes um frame; margem honesta). */
+export const LIVE_CHUNK_BASE64_MAX = Math.ceil(((LIVE_INPUT_SAMPLE_RATE * 2 * 10) / 3) * 4)

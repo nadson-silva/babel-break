@@ -10,7 +10,7 @@
  * Tags de erro continuam kebab-case em inglês por contrato interno
  * (normalização, banco de interferência e caderno compartilham o alfabeto).
  */
-import type { CefrLevel, CorrectionStyle } from '../shared/types'
+import type { CefrLevel, CorrectionStyle, SpeechRate } from '../shared/types'
 import { languageMeta, type PromptLocale } from './languages'
 import type { LessonContentOutput } from './schemas'
 
@@ -384,6 +384,84 @@ export function tutorOpenerMessage(context: TutorContext): string {
   if (context.topic) return `Comece a conversa sobre: ${context.topic}.`
   if (context.lesson) return `Comece uma conversa curta ligada à lição "${context.lesson.title}".`
   return 'Comece a conversa puxando um assunto ligado ao objetivo do aluno.'
+}
+
+// --- V3: conversa em tempo real (voz ao vivo) --------------------------------
+
+/**
+ * Versão da instrução de voz ao vivo. Separada do `PROMPT_VERSION` do conteúdo
+ * persistido: a fala não entra em cache de lição — muda com o motor, não com o
+ * banco. Carimbada em `live_sessions` (Lote 3) para debug de regressão.
+ */
+export const LIVE_PROMPT_VERSION = 1
+
+export interface LiveVoiceInput {
+  context: TutorContext
+  rate: SpeechRate
+  turnMode: 'vad' | 'manual'
+}
+
+/**
+ * System prompt da CHAMADA: as mesmas informações do chat (nível, objetivo,
+ * erros recorrentes, cenário), mas escrito para a BOCA — resposta falada de uma
+ * a duas frases, nada que só existe na escrita. As correções de língua continuam
+ * sendo calculadas em separado (pós-turno, no app): no áudio o tutor só faz o
+ * recast, senão a conversa vira aula e o aluno para de falar.
+ */
+export function liveVoiceSystem(input: LiveVoiceInput): string {
+  const { context, rate, turnMode } = input
+  const { locale } = context
+  const errorLines = focusSection(context.errors, 5, `banco de interferência ${locale.nativeName}→${locale.targetName}`)
+  const vocabulary =
+    context.vocabulary.length > 0
+      ? context.vocabulary.slice(0, 6).map((item) => `${item.term} (${item.translation})`).join(', ')
+      : 'nenhum ainda'
+
+  const pace =
+    rate === 'slow'
+      ? 'Fale devagar, com pausas claras entre as frases.'
+      : rate === 'fast'
+        ? 'Fale num ritmo de conversa natural, um pouco rápido.'
+        : 'Fale num ritmo de conversa natural e clara.'
+
+  const taking =
+    turnMode === 'manual'
+      ? 'O aluno abre e fecha o microfone a cada fala: ao terminar a sua frase, pare e aguarde o turno dele.'
+      : 'O aluno fala livremente e pode te interromper a qualquer momento: ao ser interrompido, pare na hora e escute.'
+
+  return [
+    `Você é um tutor de ${locale.targetName} conversando POR VOZ com um adulto falante de ${locale.nativeName}.`,
+    `Nível atual do aluno: ${context.level}. Objetivo: ${context.goal || 'conversação geral'}.`,
+    `Fale ${locale.targetName} adequado ao nível, uma ou duas frases por vez, sempre terminando com uma pergunta curta ou convite para continuar.`,
+    'Sua fala vira áudio: nunca cite markdown, listas, títulos, emojis, ortografia de dicionário ou símbolos — nada que não se diz com a boca.',
+    `Se precisar explicar algo, diga meia frase em ${locale.nativeName} e volte para o ${locale.targetName}.`,
+    pace,
+    taking,
+    '',
+    'Política de correção: recast falado. Reformule naturalmente a frase do aluno na sua resposta, sem apontar o erro e sem ler a versão corrigida como lista. As correções escritas aparecem na tela por outra via — não narr elas.',
+    'Não repita a lista de erros nem corrija mais de um ponto por fala.',
+    '',
+    'Erros recorrentes do aluno (priorize o recast destes):',
+    errorLines,
+    `Vocabulário recente que ele está aprendendo (use quando couber, sem forçar): ${quoted(vocabulary)}.`,
+    context.lesson
+      ? `A conversa vem da lição ${quoted(context.lesson.title)} (${quoted(context.lesson.objective)}). Estruturas da lição para reaparecerem na fala: ${context.lesson.grammar.join(', ') || '—'}.`
+      : '',
+    context.topic ? `Tema pedido pelo aluno: ${quoted(context.topic)}.` : '',
+    scenarioSection(context.scenario ?? null, locale),
+    context.summary ? `Resumo da conversa até agora: ${quoted(context.summary)}` : ''
+  ]
+    .filter(Boolean)
+    .join('\n')
+}
+
+/** Abertura falada da chamada (enviada como turno do sistema quando a sessão está pronta). */
+export function liveOpenerMessage(context: TutorContext): string {
+  if (context.scenario) {
+    return `Abra o roleplay com a primeira fala do personagem, em ${context.locale.targetName}, uma frase curta.`
+  }
+  if (context.topic) return `Cumprimente o aluno e abra a conversa sobre: ${context.topic}. Uma frase, no idioma-alvo.`
+  return `Cumprimente o aluno e puxe um assunto ligado ao objetivo dele. Uma frase em ${context.locale.targetName}.`
 }
 
 /** Passada de correção do texto livre do aluno (antes da resposta do tutor). */

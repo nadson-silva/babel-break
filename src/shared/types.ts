@@ -44,6 +44,11 @@ export interface AppSettings {
   /** Nome da voz prebuilt (Kore, Puck…) — chave estável, exibida como está. */
   voiceName: string
   speechRate: SpeechRate
+  /**
+   * V3: modelo da conversa em tempo real (Gemini Live). Vazio = padrão do
+   * motor. O turno continua usando `voiceName`/`speechRate` da prática de voz.
+   */
+  liveModel: string
   /** Usa a voz do sistema (Web Speech) em vez de gastar token no provedor. */
   preferSystemVoices: boolean
   /**
@@ -1161,4 +1166,82 @@ export interface DashboardView {
   reports: ReportsSummary
   cache: CacheStats
   ai: ProviderStatus
+}
+
+// --- V3: conversa por voz em tempo real --------------------------------------
+
+/** Como o turno do aluno é fechado: VAD no motor, ou manual (push-to-talk). */
+export type VoiceLiveTurnMode = 'vad' | 'manual'
+
+export type VoiceLiveState =
+  | 'connecting'
+  | 'ready'
+  | 'listening'
+  | 'speaking'
+  | 'resuming'
+  | 'ended'
+  | 'error'
+
+/**
+ * Evento da chamada ao vivo (canal push `voiceLive:event`, o 4º do app ao lado
+ * de chat/job/provider). Carimbado com `sessionId` (estável entre reconexões) e
+ * `conversationId` — mesmo argumento da M6/E4: o canal é global, a tela filtra.
+ */
+export interface VoiceLiveEvent {
+  sessionId: string
+  conversationId?: number | null
+  engine?: string
+  type:
+    | 'state'
+    | 'userTranscript'
+    | 'modelTranscript'
+    | 'audioChunk'
+    | 'turnComplete'
+    | 'interrupted'
+    | 'userActivity'
+    | 'goAway'
+    | 'error'
+    | 'ended'
+  /** type 'state': estado atual da chamada. */
+  state?: VoiceLiveState
+  /** Transcrições (userTranscript/modelTranscript) e motivos (error/ended). */
+  text?: string
+  /** true = fala em andamento (bolha parcial); false = texto fechado do turno. */
+  partial?: boolean
+  /** type 'audioChunk': PCM16 mono em base64, na taxa de `sampleRate`. */
+  audio?: string
+  sampleRate?: number
+  /** type 'userActivity': o aluno começou (true) ou parou (false) de falar. */
+  active?: boolean
+  message?: string
+}
+
+export interface VoiceLiveStartInput {
+  /** Conversa existente (tutor/cenário) que a chamada passa a alimentar. */
+  conversationId?: number | null
+  /** Chamada sem conversa (smoke): tema para a instrução da sessão. */
+  topic?: string | null
+  turnMode?: VoiceLiveTurnMode
+}
+
+export interface VoiceLiveStartView {
+  ok: boolean
+  sessionId?: string
+  conversationId?: number | null
+  state?: VoiceLiveState
+  error?: string
+}
+
+/** O que a UI lê antes de oferecer o modo voz (disponibilidade + estado). */
+export interface VoiceLiveStatusView {
+  /** Dá para conversar ao vivo agora? (Gemini com chave, ou motor local). */
+  available: boolean
+  active: boolean
+  sessionId: string | null
+  state: VoiceLiveState | 'idle'
+  engine: string | null
+  conversationId: number | null
+  turnMode: VoiceLiveTurnMode
+  /** Motivo honesto quando `available === false`, no idioma das explicações. */
+  detail: string | null
 }

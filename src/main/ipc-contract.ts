@@ -11,6 +11,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import { REPORT_KINDS, REPORT_REASONS } from '../shared/report-reasons'
+import { LIVE_CHUNK_BASE64_MAX } from '../core/voice'
 
 const id = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER)
 const count = z.number().int().min(0).max(10_000)
@@ -54,6 +55,7 @@ const CHANNEL_CONTRACTS = {
         asrModel: z.string().max(300),
         voiceName: z.string().max(60),
         speechRate: z.enum(['slow', 'normal', 'fast']),
+        liveModel: z.string().max(300),
         preferSystemVoices: z.boolean(),
         retention: z.number().min(0.7).max(0.97),
         reminderEnabled: z.boolean(),
@@ -304,6 +306,45 @@ const CHANNEL_CONTRACTS = {
   'voice:cache': noArgs,
   'voice:clear-cache': noArgs,
 
+  // --- v3: conversa por voz em tempo real -------------------------------------
+  'voiceLive:start': z.tuple([
+    z
+      .object({
+        conversationId: id.nullable().optional(),
+        topic: z.string().max(300).nullable().optional(),
+        turnMode: z.enum(['vad', 'manual']).optional()
+      })
+      .optional()
+  ]),
+  'voiceLive:stop': z.tuple([z.string().min(1).max(100).optional()]),
+  'voiceLive:status': noArgs,
+  // Frame de ~100 ms de PCM16 16 kHz em base64 (~4,3 KB); teto honesto: 10 s.
+  'voiceLive:audio': z.tuple([
+    z.object({
+      sessionId: z.string().min(1).max(100),
+      audio: z.string().min(8).max(LIVE_CHUNK_BASE64_MAX)
+    })
+  ]),
+  'voiceLive:text': z.tuple([
+    z.object({
+      sessionId: z.string().min(1).max(100),
+      text: z.string().min(1).max(2_000)
+    })
+  ]),
+  'voiceLive:turn-mode': z.tuple([
+    z.object({
+      sessionId: z.string().min(1).max(100),
+      mode: z.enum(['vad', 'manual'])
+    })
+  ]),
+  'voiceLive:interrupt': z.tuple([z.string().min(1).max(100)]),
+  'voiceLive:push-to-talk': z.tuple([
+    z.object({
+      sessionId: z.string().min(1).max(100),
+      open: z.boolean()
+    })
+  ]),
+
   // --- v2: jobs nomeados (E9) ------------------------------------------------
   // --- v2: lembrete opt-in ---------------------------------------------------
   'reminder:get': noArgs,
@@ -336,7 +377,7 @@ function issuesOf(error: z.ZodError): string {
 
 /**
  * Registra um handler com validação obrigatória de entrada. Sem contrato →
- * erro em registro (cobrar cobertura dos 57 canais é o ponto).
+ * erro em registro (cobrar cobertura dos 65 canais é o ponto).
  */
 export function handle<Args extends unknown[]>(
   channel: IpcChannel,

@@ -114,6 +114,25 @@ describe('contrato IPC', () => {
     )
   })
 
+  it('expõe o tempo real do V3 (chamada ao vivo)', () => {
+    for (const channel of [
+      'voiceLive:start',
+      'voiceLive:stop',
+      'voiceLive:status',
+      'voiceLive:audio',
+      'voiceLive:text',
+      'voiceLive:turn-mode',
+      'voiceLive:interrupt',
+      'voiceLive:push-to-talk'
+    ]) {
+      expect(registered.has(channel), channel).toBe(true)
+    }
+
+    // A chamada empurra eventos pelo 4º canal, como chat/job/provider.
+    const preload = readFileSync(path.resolve(process.cwd(), 'src/preload/index.ts'), 'utf8')
+    expect(preload).toContain("ipcRenderer.on('voiceLive:event'")
+  })
+
   it('não deixou canal órfão sem chamada no preload', () => {
     const invoked = new Set(invokedChannels())
     const orphans = [...registered.keys()].filter(

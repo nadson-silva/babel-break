@@ -25,6 +25,11 @@ import type {
   SpeechHistoryView,
   VoicePhraseView,
   VoiceStatus,
+  VoiceLiveEvent,
+  VoiceLiveStartInput,
+  VoiceLiveStartView,
+  VoiceLiveStatusView,
+  VoiceLiveTurnMode,
   HomeState,
   LanguageOption,
   LessonDetail,
@@ -248,6 +253,30 @@ const api = {
     history: (limit?: number): Promise<SpeechHistoryView> => ipcRenderer.invoke('voice:history', limit),
     cache: (): Promise<AudioCacheStats> => ipcRenderer.invoke('voice:cache'),
     clearCache: (): Promise<number> => ipcRenderer.invoke('voice:clear-cache')
+  },
+  /** V3: conversa por voz em tempo real (áudio do micro no main, eventos por push). */
+  voiceLive: {
+    status: (): Promise<VoiceLiveStatusView> => ipcRenderer.invoke('voiceLive:status'),
+    start: (input: VoiceLiveStartInput = {}): Promise<VoiceLiveStartView> =>
+      ipcRenderer.invoke('voiceLive:start', input),
+    stop: (sessionId?: string): Promise<VoiceLiveStartView> => ipcRenderer.invoke('voiceLive:stop', sessionId),
+    /** Frame PCM16 16 kHz em base64 (um chunk de ~100 ms do AudioWorklet). */
+    audio: (input: { sessionId: string; audio: string }): Promise<boolean> =>
+      ipcRenderer.invoke('voiceLive:audio', input),
+    text: (input: { sessionId: string; text: string }): Promise<boolean> =>
+      ipcRenderer.invoke('voiceLive:text', input),
+    /** Troca VAD automático ⇄ push-to-talk na mesma chamada. */
+    turnMode: (input: { sessionId: string; mode: VoiceLiveTurnMode }): Promise<VoiceLiveStartView> =>
+      ipcRenderer.invoke('voiceLive:turn-mode', input),
+    interrupt: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('voiceLive:interrupt', sessionId),
+    /** Push-to-talk: botão "falar" (abre) e "terminou" (fecha) o turno. */
+    pushToTalk: (input: { sessionId: string; open: boolean }): Promise<boolean> =>
+      ipcRenderer.invoke('voiceLive:push-to-talk', input),
+    onEvent: (callback: (event: VoiceLiveEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: VoiceLiveEvent): void => callback(payload)
+      ipcRenderer.on('voiceLive:event', listener)
+      return () => ipcRenderer.removeListener('voiceLive:event', listener)
+    }
   },
   /** V2: verificar se existe versão nova (abre a página da release, não instala). */
   update: {

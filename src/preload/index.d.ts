@@ -62,6 +62,11 @@ import type {
   SpeechHistoryView,
   VoicePhraseView,
   VoiceStatus,
+  VoiceLiveEvent,
+  VoiceLiveStartInput,
+  VoiceLiveStartView,
+  VoiceLiveStatusView,
+  VoiceLiveTurnMode,
   LogPathView
 } from '../shared/types'
 
@@ -142,6 +147,18 @@ declare global {
         history(limit?: number): Promise<SpeechHistoryView>
         cache(): Promise<AudioCacheStats>
         clearCache(): Promise<number>
+      }
+      /** V3: conversa por voz em tempo real. */
+      voiceLive: {
+        status(): Promise<VoiceLiveStatusView>
+        start(input?: VoiceLiveStartInput): Promise<VoiceLiveStartView>
+        stop(sessionId?: string): Promise<VoiceLiveStartView>
+        audio(input: { sessionId: string; audio: string }): Promise<boolean>
+        text(input: { sessionId: string; text: string }): Promise<boolean>
+        turnMode(input: { sessionId: string; mode: VoiceLiveTurnMode }): Promise<VoiceLiveStartView>
+        interrupt(sessionId: string): Promise<boolean>
+        pushToTalk(input: { sessionId: string; open: boolean }): Promise<boolean>
+        onEvent(callback: (event: VoiceLiveEvent) => void): () => void
       }
       /** V2: lembrete opt-in. */
       reminder: {

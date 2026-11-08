@@ -90,4 +90,21 @@ describe('contrato de entrada do IPC (M6/D2)', () => {
     await expect(invoke('lesson:answer', { exerciseId: 1, response: 'x', latencyMs: -5 })).rejects.toThrow(/Payload inválido/)
     await expect(invoke('tutor:send', { requestId: '', conversationId: 1, text: 'oi' })).rejects.toThrow(/Payload inválido/)
   })
+
+  it('V3: canais de tempo real recusam payload fora do contrato', async () => {
+    // Frame de áudio acima do teto (10 s de PCM16 16 kHz em base64).
+    await expect(
+      invoke('voiceLive:audio', { sessionId: 'live-1', audio: 'A'.repeat(500_000) })
+    ).rejects.toThrow(/Payload inválido/)
+    await expect(invoke('voiceLive:audio', { sessionId: '', audio: 'AAA' })).rejects.toThrow(/Payload inválido/)
+
+    // Modo de turno fora do enum; sessão vazia.
+    await expect(invoke('voiceLive:turn-mode', { sessionId: 'live-1', mode: 'empurra-puxa' })).rejects.toThrow(
+      /Payload inválido/
+    )
+    await expect(invoke('voiceLive:interrupt', '')).rejects.toThrow(/Payload inválido/)
+
+    // Start aceita vazio (sem args) e objeto; recusa tipos errados.
+    await expect(invoke('voiceLive:start', { conversationId: 'uma-string' })).rejects.toThrow(/Payload inválido/)
+  })
 })

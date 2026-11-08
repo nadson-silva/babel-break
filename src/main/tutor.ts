@@ -59,6 +59,9 @@ type ProfileRow = typeof schema.profiles.$inferSelect
 /** Mensagens mantidas literalmente na janela rolante do prompt. */
 const WINDOW = 12
 
+/** V3: janela re-injetada numa chamada ao vivo retomada (turnos de texto). */
+const LIVE_WINDOW = 10
+
 interface LiveTurn {
   controller: AbortController
   /** V2: de quem é este turno — trocar de perfil cancela só o dele. */
@@ -295,6 +298,32 @@ function buildContext(profileId: number, conversation: ConversationRow): TutorCo
     topic: conversation.topic,
     scenario,
     locale: localeFor(profile)
+  }
+}
+
+/**
+ * V3: contexto + janela de histórico para a CHAMADA AO VIVO. A sessão live não
+ * roda no pipeline de texto (`sendTurn`) — ela fala e ouve — mas precisa das
+ * MESMAS informações: nível, objetivo, tags do caderno, persona de cenário e
+ * idioma das explicações. O `window` alimenta a reinjeção de histórico quando o
+ * motor não tem retomada nativa (e nos testes, quando o fake nunca teve sessão).
+ */
+export function liveContextFor(
+  profileId: number,
+  conversationId: number
+): { context: TutorContext; window: ChatMessage[] } {
+  const conversation = conversationOf(profileId, conversationId)
+  if (!conversation) throw new Error('Conversa não encontrada.')
+
+  const rows = messagesOf(conversation.id).filter((row) => row.content.trim().length > 0)
+  const slice = rows.length > LIVE_WINDOW ? rows.slice(rows.length - LIVE_WINDOW) : rows
+
+  return {
+    context: buildContext(profileId, conversation),
+    window: slice.map((row) => ({
+      role: row.role === 'user' ? 'user' : 'assistant',
+      content: row.content
+    }))
   }
 }
 

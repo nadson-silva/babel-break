@@ -48,6 +48,7 @@ function toForm(settings: SettingsPayload): AppSettings {
     asrModel: settings.asrModel,
     voiceName: settings.voiceName,
     speechRate: settings.speechRate,
+    liveModel: settings.liveModel,
     preferSystemVoices: settings.preferSystemVoices,
     retention: settings.retention,
     reminderEnabled: settings.reminderEnabled,

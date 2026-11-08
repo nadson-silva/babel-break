@@ -20,6 +20,7 @@ const DEFAULTS: AppSettings = {
   asrModel: '',
   voiceName: 'Kore',
   speechRate: 'normal',
+  liveModel: '',
   preferSystemVoices: false,
   // V2 (D11): padrão do algoritmo, mas o aluno pode escolher (0,70–0,97).
   retention: 0.9,

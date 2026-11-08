@@ -13,6 +13,7 @@ import { registerReminderIpc } from './reminders'
 import { registerUpdateIpc } from './updater'
 import { registerPortableIpc } from './portable'
 import { registerVoiceIpc } from './voice'
+import { registerVoiceLiveIpc } from './voice-live'
 import { registerJobsIpc } from './jobs-ipc'
 import { registerReportsIpc } from './reports'
 import { refreshProviderStatus } from './provider-status'
@@ -152,5 +153,6 @@ export function registerIpcHandlers(): void {
   registerReminderIpc()
   registerUpdateIpc()
   registerVoiceIpc()
+  registerVoiceLiveIpc()
   registerJobsIpc()
 }
