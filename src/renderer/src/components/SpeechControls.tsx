@@ -407,7 +407,7 @@ export function MicDictate({ onText, onProblem }: { onText: (text: string) => vo
             className="inline-flex items-center gap-1.5 rounded-lg bg-danger px-2.5 py-1.5 text-xs font-semibold text-surface transition-colors hover:bg-danger/90"
           >
             <StopIcon />
-            {t.voice.stop.replace('{seconds}', '0')}
+            {t.voice.sendDictation}
           </button>
           <button
             type="button"

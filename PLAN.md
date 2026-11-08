@@ -491,6 +491,11 @@ leitura tolerante de JSON, e a degradação honesta para idioma ≠ inglês.
 - **D8**: `UI_LANGUAGES` em `shared/` e teste cruzado com `RUNTIME_TEXT_LANGUAGES`
   (a UI não pode oferecer idioma cujo texto de runtime o main não escreve).
 
+**Portas de entrada testadas**: migrações 0007/0008 aplicadas sobre um banco v1
+**com dados** (`v2.migrations.test.ts`) — backfill de `lessons.profile_id` por
+unidade e por trilha, lição realmente órfã continuando sem dono, FK cascade nas
+tabelas de voz e `integrity_check` no fim. Cobertura: 263 → 397 testes.
+
 **O que a V2 não entrega** (explícito, para não virar lenda): validação em
 Windows/macOS, auto-update que instala sozinho, RAG/dicionários de pronúncia
 fonêmica (o score compara texto, não som), e C9 completo (agregações do painel

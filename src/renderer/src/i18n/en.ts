@@ -143,6 +143,7 @@ export const en: Dictionary = {
     fromCache: 'from cache',
     record: 'Record my voice',
     stop: 'Stop ({seconds}s)',
+    sendDictation: 'Send dictation',
     scoring: 'Transcribing and scoring…',
     check: 'Check',
     typeInstead: 'Or type what you said',

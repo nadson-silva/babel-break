@@ -138,6 +138,7 @@ export const ptBR = {
     fromCache: 'do cache',
     record: 'Gravar minha fala',
     stop: 'Encerrar ({seconds}s)',
+    sendDictation: 'Enviar ditado',
     scoring: 'Transcrevendo e pontuando…',
     check: 'Conferir',
     typeInstead: 'Ou digite o que você disse',
