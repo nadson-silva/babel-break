@@ -8,6 +8,16 @@ export type ProviderId = 'gemini' | 'ollama'
 
 export type CorrectionStyle = 'recast' | 'explicit' | 'both'
 
+/**
+ * Papel de modelo (v1 pendência §3, entregue na v2): nem toda tarefa quer o
+ * mesmo modelo. Corrigir e resumir pedem rápido; gerar currículo e lição pedem
+ * forte; voz tem modelo próprio (TTS) e outro para transcrição.
+ */
+export type ModelRole = 'chat' | 'quick' | 'strong' | 'tts' | 'asr'
+
+/** Ritmo da fala sintetizada. */
+export type SpeechRate = 'slow' | 'normal' | 'fast'
+
 export interface AppSettings {
   provider: ProviderId
   geminiModel: string
@@ -19,6 +29,36 @@ export interface AppSettings {
   uiLang: string
   /** M5: pré-gerar o próximo conteúdo provável quando o app está ocioso. */
   pregenerate: boolean
+  /**
+   * V2: modelos por papel. Vazio = usar o modelo do provedor (`chat`).
+   * `quick` manda em correção/nota/resumo; `strong` em currículo/lição/trilha/cenário.
+   */
+  quickModel: string
+  strongModel: string
+  /** V2: voz. `voiceEnabled` desliga a prática de fala inteira (UI + geração). */
+  voiceEnabled: boolean
+  /** Modelo TTS do provedor (Gemini). Vazio = padrão do provedor. */
+  ttsModel: string
+  /** Modelo de transcrição. Vazio = `quick` (que costuma ser o flash). */
+  asrModel: string
+  /** Nome da voz prebuilt (Kore, Puck…) — chave estável, exibida como está. */
+  voiceName: string
+  speechRate: SpeechRate
+  /** Usa a voz do sistema (Web Speech) em vez de gastar token no provedor. */
+  preferSystemVoices: boolean
+}
+
+/**
+ * Papel de modelo resolvido no main (v2). O **rótulo** não vem daqui: é texto de
+ * interface, vive no dicionário do renderer (`t.settings.role*`).
+ */
+export interface ModelRoleView {
+  role: 'chat' | 'quick' | 'strong'
+  /** O modelo de fato em uso para aquele papel. */
+  resolved: string
+  /** Override gravado nas settings; vazio = herdado do provedor. */
+  override: string
+  inherited: boolean
 }
 
 /**
@@ -53,6 +93,16 @@ export interface SettingsPayload extends AppSettings {
   hasGeminiKey: boolean
   secureStorage: SecureStorageInfo
   runtime: RuntimeInfo
+  /** V2: modelo realmente usado em cada papel (chat/quick/strong). */
+  roles: ModelRoleView[]
+  /** V2: o que o provedor atual consegue fazer com voz. */
+  voice: VoiceStatus
+  /** V2: modelos TTS listados pelo provedor (vazio = só o padrão). */
+  ttsModels: string[]
+  /** V2: vozes disponíveis (catálogo do provedor). */
+  voices: string[]
+  /** V2: dá para usar a voz do sistema aqui? (o renderer responde de verdade) */
+  systemVoicesPossible: boolean
 }
 
 export interface ModelInfo {
@@ -131,6 +181,10 @@ export type ExerciseType =
   | 'translate'
   | 'order'
   | 'free_production'
+  /** V2 (voz): ouvir o áudio e escolher/transcrever o que ouviu. */
+  | 'listen_repeat'
+  /** V2 (voz): ler a frase em voz alta e receber score de pronúncia. */
+  | 'speak_sentence'
 
 export interface ProfileView {
   id: number
@@ -301,6 +355,8 @@ export interface CurriculumView {
 export interface ExerciseView {
   id: number
   type: ExerciseType
+  /** Lição dona (V2: histórico de voz e drills apontam para ela). */
+  lessonId: number | null
   instruction: string
   prompt: string
   options: string[]
@@ -308,6 +364,13 @@ export interface ExerciseView {
   source: 'ai' | 'fallback' | null
   /** Tags de erro que o exercício treina — visível no player (M2). */
   targetTags: string[]
+  /**
+   * V2: texto que o áudio deste exercício deve dizer. `listen_repeat` toca isto
+   * (o enunciado não revela a resposta); `speak_sentence` é o que o aluno lê.
+   */
+  speechText: string | null
+  /** Tradução/apoio da frase falada, quando existe. */
+  speechHint: string | null
 }
 
 export interface LessonDetail {
@@ -873,6 +936,163 @@ export interface ImportResultView {
   warnings: string[]
   audioSkipped: number
   stale: { lessonContent: number; exercises: number }
+}
+
+// --- V2: voz (TTS + ASR + score de pronúncia) e jobs nomeados ----------------
+
+/** Tipos de trabalho longo que a v2 expõe como job cancelável. */
+export type JobKind =
+  | 'voice:tts'
+  | 'voice:asr'
+  | 'voice:grade'
+  | 'lesson:generate'
+  | 'curriculum:generate'
+  | 'track:draft'
+
+export type JobState = 'queued' | 'progress' | 'done' | 'error' | 'cancelled'
+
+export interface JobEvent {
+  id: string
+  kind: JobKind
+  profileId: number
+  label: string
+  state: JobState
+  /** 0–1 quando se sabe; jobs de streaming às vezes só sabem "andando". */
+  progress?: number
+  message?: string
+  at: number
+  requestId?: string
+  durationMs?: number
+}
+
+export interface JobView {
+  id: string
+  kind: JobKind
+  profileId: number
+  label: string
+  progress: number
+  startedAt: number
+}
+
+/** O que o app consegue fazer com voz, agora, no provedor do aluno. */
+export interface VoiceStatus {
+  provider: ProviderId
+  /** Síntese de fala disponível (provedor com TTS configurado). */
+  tts: boolean
+  /** Transcrição de fala disponível (provedor que aceita áudio). */
+  asr: boolean
+  /** Modelo/voz usados, para a UI dizer a verdade. */
+  ttsModel: string
+  asrModel: string
+  voice: string
+  voices: string[]
+  /** O provedor atual tem capacidade de fala alguma. */
+  mode: 'provider' | 'none'
+  detail: string | null
+}
+
+/** Resposta de `voice:speak`: áudio pronto para tocar. */
+export interface SpeechAudioView {
+  ok: boolean
+  /** `data:audio/wav;base64,…` quando o provedor sintetizou. */
+  dataUrl: string | null
+  mime: string | null
+  durationMs: number
+  /** 'cache' = veio do SQLite (offline, sem token); 'provider' = gerado agora. */
+  source: 'cache' | 'provider' | 'none'
+  error?: string
+}
+
+/** Uma tentativa de fala do aluno. */
+export interface SpeechGradeView {
+  runId: number
+  kind: 'speak' | 'listen'
+  target: string
+  transcript: string | null
+  /** 0–1 (escala única do app). */
+  score: number
+  accuracy: number
+  precision: number
+  confidence: number
+  words: PronunciationWordView[]
+  extraWords: number
+  transcriptEmpty: boolean
+  tags: string[]
+  /** Frase honesta no idioma das explicações ("Pronúncia: 82% …"). */
+  summary: string
+  source: 'provider' | 'none'
+  asrModel: string | null
+  latencyMs: number
+  /** Skill afetada: speaking (fala) ou listening (ouvido). */
+  skill: 'speaking' | 'listening'
+  passed: boolean
+}
+
+export interface PronunciationWordView {
+  text: string
+  status: 'ok' | 'near' | 'wrong' | 'missing' | 'extra'
+  heard?: string
+}
+
+/** Uma frase oferecida pela prática de voz (lição recente ou caderno de erros). */
+export interface VoicePhraseView {
+  target: string
+  native: string | null
+  origin: string | null
+  source: 'lesson' | 'error'
+}
+
+export interface SpeechRunView {
+  id: number
+  kind: 'speak' | 'listen'
+  target: string
+  transcript: string | null
+  score: number | null
+  skill: 'speaking' | 'listening'
+  lessonId: number | null
+  lessonTitle: string | null
+  createdAt: number
+  source: string
+}
+
+/** Estatísticas do cache de áudio do perfil (Configurações). */
+export interface AudioCacheStats {
+  rows: number
+  bytes: number
+  max: number
+}
+
+export interface SpeechHistoryView {
+  runs: SpeechRunView[]
+  /** Médias por skill, no formato do painel (0–1). */
+  speakingAverage: number | null
+  listeningAverage: number | null
+  total: number
+}
+
+/** Pedido de correção de fala vindo do renderer (áudio já gravado). */
+export interface SpeechGradeRequest {
+  /** `audio/wav` ou `audio/webm` — o main converte o que der. */
+  mime: string
+  /** base64 sem data URL. */
+  audio: string
+  target: string
+  kind: 'speak' | 'listen'
+  lessonId?: number | null
+  exerciseId?: number | null
+  requestId?: string
+  /** 'answer' = o aluno digitou em vez de gravar (listening sem microfone). */
+  typedAnswer?: string
+}
+
+/** Resultado de `voice:listen-check` (compreensão sem microfone). */
+export interface ListeningResultView {
+  ok: boolean
+  correct: boolean
+  score: number
+  runId: number
+  feedback: string
+  error?: string
 }
 
 export interface DashboardView {

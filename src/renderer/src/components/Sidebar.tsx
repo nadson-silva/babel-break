@@ -90,6 +90,15 @@ function SettingsIcon(): JSX.Element {
   )
 }
 
+function VoiceIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <path d="M12 4.5a2.6 2.6 0 0 1 2.6 2.6v4a2.6 2.6 0 0 1-5.2 0v-4A2.6 2.6 0 0 1 12 4.5Z" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M6 11a6 6 0 0 0 12 0M12 17v2.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
 function ProfilesIcon(): JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
@@ -365,6 +374,13 @@ export function Sidebar({
           onClick={() => onNavigate('tutor')}
           icon={<ChatIcon />}
           label={t.nav.tutor}
+        />
+        <NavButton
+          active={view === 'voice'}
+          target="voice"
+          onClick={() => onNavigate('voice')}
+          icon={<VoiceIcon />}
+          label={t.nav.voice}
         />
         <NavButton
           active={view === 'review'}

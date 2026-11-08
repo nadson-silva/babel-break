@@ -125,7 +125,8 @@ export async function ensureLessonScenario(
     const generated = await generateStructured(scenarioSchema, {
       system: prompt.system,
       user: prompt.user,
-      temperature: 0.6
+      temperature: 0.6,
+      role: 'strong'
     })
     stored = { ...generated, source: 'ai', ...(goalTag ? { trackGoalTag: goalTag } : {}) }
   } catch (error) {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { JSX, ReactNode } from 'react'
 import type {
   AppSettings,
+  AudioCacheStats,
   LanguageOption,
   ModelInfo,
   ProfileState,
@@ -34,9 +35,24 @@ function toForm(settings: SettingsPayload): AppSettings {
     correctionStyle: settings.correctionStyle,
     focusMix: settings.focusMix,
     uiLang: settings.uiLang,
-    pregenerate: settings.pregenerate
+    pregenerate: settings.pregenerate,
+    // V2: papéis de modelo e voz.
+    quickModel: settings.quickModel,
+    strongModel: settings.strongModel,
+    voiceEnabled: settings.voiceEnabled,
+    ttsModel: settings.ttsModel,
+    asrModel: settings.asrModel,
+    voiceName: settings.voiceName,
+    speechRate: settings.speechRate,
+    preferSystemVoices: settings.preferSystemVoices
   }
 }
+
+const ROLE_LABEL = {
+  chat: 'roleChat',
+  quick: 'roleQuick',
+  strong: 'roleStrong'
+} as const satisfies Record<'chat' | 'quick' | 'strong', keyof typeof t.settings>
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -102,6 +118,10 @@ export function SettingsScreen({
   })
   // M5: estado da pré-geração/cache e da sonda de disponibilidade da IA.
   const [cache, setCache] = useState<PrewarmState | null>(null)
+  // V2: cache de áudio (mostra e limpa na seção de voz).
+  const [audioCache, setAudioCache] = useState<AudioCacheStats | null>(null)
+  const [clearingAudio, setClearingAudio] = useState(false)
+  const [audioMessage, setAudioMessage] = useState<string | null>(null)
   const [warming, setWarming] = useState(false)
   const [warmMessage, setWarmMessage] = useState<string | null>(null)
 
@@ -113,6 +133,7 @@ export function SettingsScreen({
     void loadModels('gemini')
     void loadModels('ollama')
     void loadCache()
+    void window.api.voice.cache().then(setAudioCache).catch(() => undefined)
   }, [])
 
   async function loadCache(): Promise<void> {
@@ -616,6 +637,180 @@ export function SettingsScreen({
               <span className="w-14 text-right text-sm font-semibold text-accent">
                 {Math.round(form.focusMix * 100)}%
               </span>
+            </div>
+          </Section>
+
+          {/* --- V2: modelo por papel ------------------------------------- */}
+          <Section title={t.settings.roleTitle} help={t.settings.roleHelp}>
+            <div className="space-y-3">
+              {settings.roles.map((role) => (
+                <div key={role.role} className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  <span className="w-44 shrink-0 text-xs text-muted">{t.settings[ROLE_LABEL[role.role]]}</span>
+                  <input
+                    value={role.role === 'quick' ? form.quickModel : role.role === 'strong' ? form.strongModel : ''}
+                    onChange={(event) =>
+                      setForm((current) =>
+                        role.role === 'quick'
+                          ? { ...current, quickModel: event.target.value }
+                          : role.role === 'strong'
+                            ? { ...current, strongModel: event.target.value }
+                            : current
+                      )
+                    }
+                    disabled={role.role === 'chat'}
+                    placeholder={role.resolved || t.settings.roleInherited}
+                    className="min-w-0 flex-1 rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50 disabled:opacity-50"
+                  />
+                  <span className="text-[11px] text-faint sm:w-56">
+                    {role.role === 'chat'
+                      ? role.resolved || '—'
+                      : role.inherited
+                        ? `${t.settings.roleInherited}: ${role.resolved || '—'}`
+                        : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </Section>
+
+          {/* --- V2: voz --------------------------------------------------- */}
+          <Section title={t.settings.voiceTitle} help={t.settings.voiceHelp}>
+            <div className="space-y-4">
+              <label className="flex items-start gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={form.voiceEnabled}
+                  onChange={(event) => setForm((current) => ({ ...current, voiceEnabled: event.target.checked }))}
+                  className="mt-0.5 accent-[#4cc2a0]"
+                />
+                <span>{t.settings.voiceEnable}</span>
+              </label>
+
+              {settings.voice.mode === 'none' && (
+                <p className="rounded-xl border border-warn/30 bg-warn-soft px-3 py-2 text-[11px] text-ink">
+                  {t.settings.voiceUnavailable}
+                </p>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.voiceName}</span>
+                  <select
+                    value={form.voiceName}
+                    onChange={(event) => setForm((current) => ({ ...current, voiceName: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none focus:border-accent/50"
+                  >
+                    {(settings.voices.length > 0 ? settings.voices : [form.voiceName]).map((voice) => (
+                      <option key={voice} value={voice}>
+                        {voice}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.voiceRate}</span>
+                  <select
+                    value={form.speechRate}
+                    onChange={(event) =>
+                      setForm((current) => ({ ...current, speechRate: event.target.value as AppSettings['speechRate'] }))
+                    }
+                    className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none focus:border-accent/50"
+                  >
+                    <option value="slow">{t.voice.rateSlow}</option>
+                    <option value="normal">{t.voice.rateNormal}</option>
+                    <option value="fast">{t.voice.rateFast}</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.voiceTts}</span>
+                  <input
+                    value={form.ttsModel}
+                    onChange={(event) => setForm((current) => ({ ...current, ttsModel: event.target.value }))}
+                    placeholder={settings.voice.ttsModel || t.settings.roleInherited}
+                    className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50"
+                  />
+                  {settings.ttsModels.length > 0 && (
+                    <span className="mt-1 flex flex-wrap gap-1">
+                      {settings.ttsModels.map((model) => (
+                        <button
+                          key={model}
+                          type="button"
+                          onClick={() => setForm((current) => ({ ...current, ttsModel: model }))}
+                          className={`rounded-md border px-2 py-0.5 text-[10px] transition-colors ${
+                            form.ttsModel === model
+                              ? 'border-accent/60 bg-accent-soft text-accent'
+                              : 'border-line bg-panel-2 text-muted hover:text-ink'
+                          }`}
+                        >
+                          {model}
+                        </button>
+                      ))}
+                    </span>
+                  )}
+                </label>
+
+                <label className="block">
+                  <span className="text-[10px] uppercase tracking-wider text-faint">{t.settings.voiceAsr}</span>
+                  <input
+                    value={form.asrModel}
+                    onChange={(event) => setForm((current) => ({ ...current, asrModel: event.target.value }))}
+                    placeholder={settings.voice.asrModel || t.settings.roleInherited}
+                    className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50"
+                  />
+                </label>
+              </div>
+
+              <label className="flex items-start gap-2 text-xs text-muted">
+                <input
+                  type="checkbox"
+                  checked={form.preferSystemVoices}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, preferSystemVoices: event.target.checked }))
+                  }
+                  className="mt-0.5 accent-[#4cc2a0]"
+                />
+                <span>
+                  {t.settings.voiceSystem}
+                  <span className="mt-0.5 block text-[11px] text-faint">{t.settings.voiceSystemHelp}</span>
+                </span>
+              </label>
+
+              <div className="rounded-xl border border-line bg-panel-2 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-faint">{t.settings.voiceCache}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {audioCache
+                    ? t.voice.cacheStats
+                        .replace('{rows}', String(audioCache.rows))
+                        .replace('{kb}', String(Math.round(audioCache.bytes / 1024)))
+                    : '—'}
+                </p>
+                <p className="mt-1 text-[11px] text-faint">{t.settings.voiceCacheHelp}</p>
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={clearingAudio || (audioCache?.rows ?? 0) === 0}
+                    onClick={() => {
+                      setClearingAudio(true)
+                      setAudioMessage(null)
+                      void window.api.voice
+                        .clearCache()
+                        .then((removed) => {
+                          setAudioMessage(t.voice.cacheCleared.replace('{count}', String(removed)))
+                          return window.api.voice.cache()
+                        })
+                        .then((next) => setAudioCache(next))
+                        .catch((error: unknown) => setError(messageOf(error)))
+                        .finally(() => setClearingAudio(false))
+                    }}
+                    className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel hover:text-ink disabled:opacity-50"
+                  >
+                    {t.voice.cacheClear}
+                  </button>
+                  {audioMessage && <span className="text-[11px] text-accent">{audioMessage}</span>}
+                </div>
+              </div>
             </div>
           </Section>
 

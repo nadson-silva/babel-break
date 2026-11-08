@@ -12,9 +12,19 @@ import type {
   GradeFeedback,
   GuidedSession,
   GuidedStep,
+  AudioCacheStats,
   ExportFileView,
+  JobEvent,
+  JobView,
+  ListeningResultView,
   ImportResultView,
   InspectView,
+  SpeechAudioView,
+  SpeechGradeRequest,
+  SpeechGradeView,
+  SpeechHistoryView,
+  VoicePhraseView,
+  VoiceStatus,
   HomeState,
   LanguageOption,
   LessonDetail,
@@ -215,6 +225,36 @@ const api = {
     undoTarget: (kind: ReportKind, targetId: number): Promise<ReportItemView | null> =>
       ipcRenderer.invoke('report:undo-target', kind, targetId),
     list: (limit?: number): Promise<ReportsSummary> => ipcRenderer.invoke('report:list', limit)
+  },
+  /** V2: voz — status, síntese, correção de fala, frases e cache de áudio. */
+  voice: {
+    status: (): Promise<VoiceStatus> => ipcRenderer.invoke('voice:status'),
+    speak: (input: { text: string; lang?: string; requestId?: string }): Promise<SpeechAudioView> =>
+      ipcRenderer.invoke('voice:speak', input),
+    grade: (input: SpeechGradeRequest): Promise<SpeechGradeView> => ipcRenderer.invoke('voice:grade', input),
+    listen: (input: {
+      exerciseId: number
+      response: string
+      target: string
+      lessonId?: number | null
+      latencyMs?: number
+    }): Promise<ListeningResultView> => ipcRenderer.invoke('voice:listen', input),
+    phrases: (limit?: number): Promise<VoicePhraseView[]> => ipcRenderer.invoke('voice:phrases', limit),
+    dictate: (input: { mime: string; audio: string; requestId?: string }): Promise<{ ok: boolean; text: string; error?: string }> =>
+      ipcRenderer.invoke('voice:dictate', input),
+    history: (limit?: number): Promise<SpeechHistoryView> => ipcRenderer.invoke('voice:history', limit),
+    cache: (): Promise<AudioCacheStats> => ipcRenderer.invoke('voice:cache'),
+    clearCache: (): Promise<number> => ipcRenderer.invoke('voice:clear-cache')
+  },
+  /** V2 (E9): jobs longos com progresso e cancelamento. */
+  job: {
+    list: (): Promise<JobView[]> => ipcRenderer.invoke('job:list'),
+    cancel: (jobId: string): Promise<boolean> => ipcRenderer.invoke('job:cancel', jobId),
+    onEvent: (callback: (event: JobEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, payload: JobEvent): void => callback(payload)
+      ipcRenderer.on('job:event', listener)
+      return () => ipcRenderer.removeListener('job:event', listener)
+    }
   },
   /** V2: backup portável — exportar um perfil, conferir um arquivo, importar. */
   data: {

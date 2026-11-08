@@ -63,6 +63,11 @@ export type RuntimeTextKey =
   | 'fb.spotError.instruction'
   | 'fb.spotError.prompt'
   | 'fb.spotError.explanation'
+  | 'fb.speak.instruction'
+  | 'fb.speak.explanation'
+  | 'fb.listen.instruction'
+  | 'fb.listen.prompt'
+  | 'fb.listen.explanation'
   // rubrica local do cenário (sem IA) e rótulo de trilha
   | 'rubric.fewTurns'
   | 'rubric.turns'
@@ -90,6 +95,7 @@ export type RuntimeTextKey =
   | 'error.aiUnavailableExercises'
   | 'error.aiKeptExercises'
   | 'error.exerciseRemoved'
+  | 'error.voiceOnly'
   | 'error.aiUnavailableScenario'
   | 'error.aiUnavailableTrack'
   // voz (v2)
@@ -100,6 +106,17 @@ export type RuntimeTextKey =
   | 'voice.scorePrefix'
   | 'voice.listenPrompt'
   | 'voice.speakPrompt'
+  | 'voice.label.tts'
+  | 'voice.label.asr'
+  | 'voice.label.score'
+  | 'job.lesson'
+  | 'job.exercises'
+  | 'job.curriculum'
+  | 'job.track'
+  | 'voice.summary.score'
+  | 'voice.summary.heard'
+  | 'voice.summary.noAudio'
+  | 'error.voiceUnavailable'
   | 'speech.kind.speak'
   | 'speech.kind.listen'
 
@@ -157,6 +174,7 @@ const PT_BR: Templates = {
     'Este exercício saiu da prática porque você reportou conteúdo ruim. Abra a lição de novo para receber exercícios novos.',
   'error.aiUnavailableScenario':
     'Sem IA disponível: o cenário determinístico offline só cobre inglês. Configure um provedor em Configurações.',
+  'error.voiceOnly': 'Esta pergunta se responde falando: use o botão de microfone para gravar a frase.',
   'error.aiUnavailableTrack':
     'A IA está indisponível e o banco de trilhas offline só cobre inglês. Para montar uma trilha de {target}, configure um provedor em Configurações.',
   'voice.noTts':
@@ -172,6 +190,17 @@ const PT_BR: Templates = {
   'voice.speakPrompt': 'Ouça a frase e repita em voz alta.',
   'speech.kind.speak': 'fala',
   'speech.kind.listen': 'escuta',
+  'voice.label.tts': 'gerando áudio da frase',
+  'voice.label.asr': 'transcrevendo sua fala',
+  'voice.label.score': 'calculando o score de pronúncia',
+  'job.lesson': 'gerando o conteúdo da lição',
+  'job.exercises': 'gerando os exercícios',
+  'job.curriculum': 'montando o currículo',
+  'job.track': 'desenhando a trilha',
+  'voice.summary.score': 'Pronúncia: {score}% das palavras no lugar.',
+  'voice.summary.heard': 'O app ouviu: “{transcript}”.',
+  'voice.summary.noAudio': 'Não deu para ouvir nada. Fale a frase inteira, sem pressa, e tente de novo.',
+  'error.voiceUnavailable': 'Este provedor não tem voz (TTS/ASR). Use um provedor com fala ou a voz do sistema para ouvir.',
   'fb.mcTranslation.instruction': 'Escolha a tradução correta.',
   'fb.mcTranslation.prompt': 'O que significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -191,6 +220,11 @@ const PT_BR: Templates = {
   'fb.spotError.instruction': 'Escolha a frase correta.',
   'fb.spotError.prompt': 'Qual destas frases está certa em {target}? (área: {tag})',
   'fb.spotError.explanation': '“{sentence}” é a forma natural.',
+  'fb.speak.instruction': 'Leia a frase em voz alta, com pronúncia clara.',
+  'fb.speak.explanation': 'Significado: {native}.',
+  'fb.listen.instruction': 'Ouça a frase e escolha o que você ouviu.',
+  'fb.listen.prompt': 'Toque o áudio quantas vezes precisar e marque a alternativa correta.',
+  'fb.listen.explanation': 'O que se ouviu quis dizer: {native}.',
   'rubric.fewTurns': 'Poucas falas suas no roleplay: na próxima, responda e devolva uma pergunta ao personagem.',
   'rubric.turns': 'Você sustentou {turns} falas no cenário ({words} palavras).',
   'rubric.touched': 'Assuntos da tarefa reconhecidos na sua fala: {touched} de {total}.',
@@ -253,6 +287,7 @@ const EN: Templates = {
     'This exercise left the practice because you reported bad content. Reopen the lesson to get new exercises.',
   'error.aiUnavailableScenario':
     'No AI available: the offline scenario bank only covers English. Configure a provider in Settings.',
+  'error.voiceOnly': 'This question is answered by speaking: use the microphone button to record the sentence.',
   'error.aiUnavailableTrack':
     'AI is unavailable and the offline track bank only covers English. To build a {target} track, configure a provider in Settings.',
   'voice.noTts':
@@ -268,6 +303,17 @@ const EN: Templates = {
   'voice.speakPrompt': 'Listen to the sentence and repeat it out loud.',
   'speech.kind.speak': 'speaking',
   'speech.kind.listen': 'listening',
+  'voice.label.tts': 'generating the sentence audio',
+  'voice.label.asr': 'transcribing your speech',
+  'voice.label.score': 'scoring the pronunciation',
+  'job.lesson': 'generating the lesson content',
+  'job.exercises': 'generating the exercises',
+  'job.curriculum': 'building the curriculum',
+  'job.track': 'drafting the track',
+  'voice.summary.score': 'Pronunciation: {score}% of the words in place.',
+  'voice.summary.heard': 'What the app heard: “{transcript}”.',
+  'voice.summary.noAudio': 'Nothing could be heard. Say the whole sentence, unhurried, and try again.',
+  'error.voiceUnavailable': 'This provider has no voice (TTS/ASR). Use a speech provider or the system voice to listen.',
   'fb.mcTranslation.instruction': 'Choose the correct translation.',
   'fb.mcTranslation.prompt': 'What does “{term}” mean?',
   'fb.mcTranslation.explanation': '“{term}” means “{translation}”.',
@@ -287,6 +333,11 @@ const EN: Templates = {
   'fb.spotError.instruction': 'Choose the correct sentence.',
   'fb.spotError.prompt': 'Which of these sentences is right in {target}? (area: {tag})',
   'fb.spotError.explanation': '“{sentence}” is the natural form.',
+  'fb.speak.instruction': 'Read the sentence out loud, with clear pronunciation.',
+  'fb.speak.explanation': 'It means: {native}.',
+  'fb.listen.instruction': 'Listen to the sentence and choose what you heard.',
+  'fb.listen.prompt': 'Play the audio as many times as you need and pick the right option.',
+  'fb.listen.explanation': 'What you heard means: {native}.',
   'rubric.fewTurns': 'Few of your lines in the roleplay: next time, answer and throw a question back at the character.',
   'rubric.turns': 'You kept {turns} lines in the scenario ({words} words).',
   'rubric.touched': 'Task topics recognized in your speech: {touched} of {total}.',
@@ -349,6 +400,7 @@ const ES: Templates = {
     'Este ejercicio salió de la práctica porque reportaste contenido malo. Abre de nuevo la lección para recibir ejercicios nuevos.',
   'error.aiUnavailableScenario':
     'Sin IA: el banco de escenarios sin conexión solo cubre inglés. Configura un proveedor en Configuración.',
+  'error.voiceOnly': 'Esta pregunta se responde hablando: usa el botón del micrófono para grabar la frase.',
   'error.aiUnavailableTrack':
     'La IA no está disponible y el banco de itinerarios sin conexión solo cubre inglés. Para crear una ruta de {target}, configura un proveedor en Configuración.',
   'voice.noTts':
@@ -364,6 +416,17 @@ const ES: Templates = {
   'voice.speakPrompt': 'Escucha la frase y repítela en voz alta.',
   'speech.kind.speak': 'habla',
   'speech.kind.listen': 'escucha',
+  'voice.label.tts': 'generando el audio de la frase',
+  'voice.label.asr': 'transcribiendo tu habla',
+  'voice.label.score': 'calculando la puntuación de pronunciación',
+  'job.lesson': 'generando el contenido de la lección',
+  'job.exercises': 'generando los ejercicios',
+  'job.curriculum': 'creando el plan de estudios',
+  'job.track': 'diseñando la ruta',
+  'voice.summary.score': 'Pronunciación: {score}% de las palabras en su lugar.',
+  'voice.summary.heard': 'La app oyó: “{transcript}”.',
+  'voice.summary.noAudio': 'No se pudo oír nada. Di la frase completa, sin prisa, e inténtalo de nuevo.',
+  'error.voiceUnavailable': 'Este proveedor no tiene voz (TTS/ASR). Usa un proveedor con habla o la voz del sistema para oír.',
   'fb.mcTranslation.instruction': 'Elige la traducción correcta.',
   'fb.mcTranslation.prompt': '¿Qué significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -383,6 +446,11 @@ const ES: Templates = {
   'fb.spotError.instruction': 'Elige la frase correcta.',
   'fb.spotError.prompt': '¿Cuál de estas frases es correcta en {target}? (área: {tag})',
   'fb.spotError.explanation': '“{sentence}” es la forma natural.',
+  'fb.speak.instruction': 'Lee la frase en voz alta, con pronunciación clara.',
+  'fb.speak.explanation': 'Significa: {native}.',
+  'fb.listen.instruction': 'Escucha la frase y elige lo que oíste.',
+  'fb.listen.prompt': 'Reproduce el audio tantas veces como necesites y marca la opción correcta.',
+  'fb.listen.explanation': 'Lo que se oyó significa: {native}.',
   'rubric.fewTurns': 'Pocas intervenciones tuyas en el roleplay: la próxima vez responde y devuelve una pregunta al personaje.',
   'rubric.turns': 'Mantuviste {turns} intervenciones en el escenario ({words} palabras).',
   'rubric.touched': 'Temas de la tarea reconocidos en tu habla: {touched} de {total}.',
@@ -445,6 +513,7 @@ const FR: Templates = {
     'Cet exercice a quitté la pratique parce que vous avez signalé un contenu de mauvaise qualité. Rouvrez la leçon pour recevoir de nouveaux exercices.',
   'error.aiUnavailableScenario':
     "Sans IA, la banque de scénarios hors ligne ne couvre que l'anglais. Configurez un fournisseur dans les Paramètres.",
+  'error.voiceOnly': 'Cette question se répond en parlant : utilisez le bouton micro pour enregistrer la phrase.',
   'error.aiUnavailableTrack':
     "L'IA est indisponible et la banque de parcours hors ligne ne couvre que l'anglais. Pour créer un parcours en {target}, configurez un fournisseur dans les Paramètres.",
   'voice.noTts':
@@ -460,6 +529,18 @@ const FR: Templates = {
   'voice.speakPrompt': 'Écoutez la phrase et répétez-la à voix haute.',
   'speech.kind.speak': 'parole',
   'speech.kind.listen': 'écoute',
+  'voice.label.tts': "génération de l'audio de la phrase",
+  'voice.label.asr': "transcription de votre parole",
+  'voice.label.score': "calcul du score de prononciation",
+  'job.lesson': "génération du contenu de la leçon",
+  'job.exercises': 'génération des exercices',
+  'job.curriculum': 'élaboration du programme',
+  'job.track': 'conception du parcours',
+  'voice.summary.score': "Prononciation : {score}% des mots à leur place.",
+  'voice.summary.heard': "Ce que l'app a entendu : « {transcript} ».",
+  'voice.summary.noAudio': "Rien n'a pu être entendu. Dites la phrase entière, sans hâte, et réessayez.",
+  'error.voiceUnavailable': "Ce fournisseur n'a pas de voix (TTS/ASR). Utilisez un fournisseur vocal ou la voix du système pour écouter.",
+  
   'fb.mcTranslation.instruction': 'Choisissez la traduction correcte.',
   'fb.mcTranslation.prompt': 'Que signifie « {term} » ?',
   'fb.mcTranslation.explanation': '« {term} » signifie « {translation} ».',
@@ -479,6 +560,11 @@ const FR: Templates = {
   'fb.spotError.instruction': 'Choisissez la phrase correcte.',
   'fb.spotError.prompt': 'Laquelle de ces phrases est correcte en {target} ? (domaine : {tag})',
   'fb.spotError.explanation': '« {sentence} » est la forme naturelle.',
+  'fb.speak.instruction': 'Lisez la phrase à voix haute, avec une prononciation claire.',
+  'fb.speak.explanation': 'Cela signifie : {native}.',
+  'fb.listen.instruction': 'Écoutez la phrase et choisissez ce que vous avez entendu.',
+  'fb.listen.prompt': "Jouez l'audio aussi souvent que nécessaire et cochez la bonne option.",
+  'fb.listen.explanation': 'Ce que vous avez entendu signifie : {native}.',
   'rubric.fewTurns': 'Peu de répliques de votre part dans le jeu de rôle : la prochaine fois, répondez et renvoyez une question au personnage.',
   'rubric.turns': 'Vous avez tenu {turns} répliques dans le scénario ({words} mots).',
   'rubric.touched': 'Sujets de la tâche reconnus dans votre propos : {touched} sur {total}.',

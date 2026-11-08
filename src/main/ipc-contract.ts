@@ -246,7 +246,54 @@ const CHANNEL_CONTRACTS = {
       switch: z.boolean().optional()
     })
   ]),
-  'data:active-profile': noArgs
+  'data:active-profile': noArgs,
+
+  // --- v2: voz (TTS + ASR + score de pronúncia) ------------------------------
+  'voice:status': noArgs,
+  'voice:speak': z.tuple([
+    z.object({
+      text: z.string().min(1).max(2_000),
+      lang: z.string().max(10).optional(),
+      requestId: z.string().max(100).optional()
+    })
+  ]),
+  // Áudio do microfone: WAV 16 kHz mono ≈ 32 KB/s → 8 MB de base64 é ~4 min.
+  'voice:grade': z.tuple([
+    z.object({
+      mime: z.string().max(60),
+      audio: z.string().max(8_000_000),
+      target: z.string().min(1).max(2_000),
+      kind: z.enum(['speak', 'listen']),
+      lessonId: id.nullable().optional(),
+      exerciseId: id.nullable().optional(),
+      requestId: z.string().max(100).optional(),
+      typedAnswer: z.string().max(2_000).optional()
+    })
+  ]),
+  'voice:listen': z.tuple([
+    z.object({
+      exerciseId: id,
+      response: z.string().max(2_000),
+      target: z.string().max(2_000),
+      lessonId: id.nullable().optional(),
+      latencyMs: z.number().int().min(0).max(3_600_000).optional()
+    })
+  ]),
+  'voice:dictate': z.tuple([
+    z.object({
+      mime: z.string().max(60),
+      audio: z.string().max(8_000_000),
+      requestId: z.string().max(100).optional()
+    })
+  ]),
+  'voice:history': z.tuple([z.number().int().min(1).max(100).optional()]),
+  'voice:phrases': z.tuple([z.number().int().min(1).max(40).optional()]),
+  'voice:cache': noArgs,
+  'voice:clear-cache': noArgs,
+
+  // --- v2: jobs nomeados (E9) ------------------------------------------------
+  'job:list': noArgs,
+  'job:cancel': z.tuple([z.string().min(1).max(120)])
 } satisfies Record<string, z.ZodType<unknown[]>>
 
 export type IpcChannel = keyof typeof CHANNEL_CONTRACTS

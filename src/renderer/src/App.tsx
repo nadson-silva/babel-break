@@ -22,6 +22,7 @@ import { ProgressScreen } from './screens/ProgressScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
 import { DataScreen } from './screens/DataScreen'
 import { ProfilesScreen } from './screens/ProfilesScreen'
+import { VoiceScreen } from './screens/VoiceScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TracksScreen } from './screens/TracksScreen'
@@ -350,6 +351,8 @@ export default function App(): JSX.Element {
             }}
             onOpenProfiles={() => navigate('profiles')}
           />
+        ) : view === 'voice' ? (
+          <VoiceScreen key={`voice-${refreshKey}`} onOpenSettings={() => navigate('settings')} />
         ) : view === 'profiles' ? (
           <ProfilesScreen
             key={`profiles-${refreshKey}`}

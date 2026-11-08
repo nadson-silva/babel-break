@@ -5,12 +5,20 @@ import { profileNativeLang } from './locale'
 import type { StreamRequest } from './providers/types'
 import { runtimeText } from '../core/runtime-text'
 
+/**
+ * Papel da tarefa (v2): 'quick' corrige/nota/resume, 'strong' gera currículo,
+ * lição, trilha e cenário, 'chat' é o modelo do provedor sem override.
+ */
+export type AiRole = 'chat' | 'quick' | 'strong'
+
 export interface StructuredRequest {
   system: string
   user: string
   temperature?: number
   /** Cancelamento externo (ex.: aluno fechou a tela) — soma-se ao deadline. */
   signal?: AbortSignal
+  /** V2: papel do modelo; padrão 'strong' em geração estruturada. */
+  role?: AiRole
 }
 
 /**
@@ -62,10 +70,11 @@ export async function trackedStream(request: StreamRequest, onToken: (token: str
   const settings = getSettings()
   const provider = getProvider(settings.provider)
   const signal = withDeadline(request.signal, STREAM_DEADLINE_MS)
+  const model = request.role ? modelForRole(request.role) : request.model
 
   inFlight += 1
   try {
-    return await provider.stream({ ...request, signal }, onToken)
+    return await provider.stream({ ...request, model, signal }, onToken)
   } finally {
     inFlight -= 1
   }
@@ -76,12 +85,38 @@ export function currentModel(): string {
   return (settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel).trim()
 }
 
-export function ensureModelConfigured(): string {
-  const model = currentModel()
+/**
+ * Modelo do papel (v2): override quando existe, senão o modelo do provedor.
+ * Assim "modelo rápido para corrigir, forte para gerar" (§3) deixa de ser
+ * ficção de plano — e quem não configurou nada continua como na v1.
+ */
+export function modelForRole(role: AiRole = 'chat'): string {
+  const settings = getSettings()
+  const base = currentModel()
+  if (role === 'quick') return settings.quickModel.trim() || base
+  if (role === 'strong') return settings.strongModel.trim() || base
+  return base
+}
+
+export function ensureModelConfigured(role: AiRole = 'chat'): string {
+  const model = modelForRole(role)
   if (!model) {
     throw new Error(runtimeText(profileNativeLang(), 'error.noModel'))
   }
   return model
+}
+
+/** Papéis resolvidos, para a tela de Configurações dizer a verdade. */
+export function roleViews(): Array<{ role: 'chat' | 'quick' | 'strong'; resolved: string; override: string; inherited: boolean }> {
+  const settings = getSettings()
+  const base = currentModel()
+  const build = (role: 'chat' | 'quick' | 'strong', override: string) => ({
+    role,
+    resolved: override.trim() || base,
+    override: override.trim(),
+    inherited: override.trim().length === 0
+  })
+  return [build('chat', ''), build('quick', settings.quickModel), build('strong', settings.strongModel)]
 }
 
 function extractJson(text: string): unknown {
@@ -112,7 +147,7 @@ export async function generateStructured<T>(
   schema: z.ZodType<T>,
   request: StructuredRequest
 ): Promise<T> {
-  const model = ensureModelConfigured()
+  const model = ensureModelConfigured(request.role ?? 'strong')
   const settings = getSettings()
   const provider = getProvider(settings.provider)
 

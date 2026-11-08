@@ -103,7 +103,10 @@ export const exerciseTypeSchema = z.enum([
   'cloze',
   'translate',
   'order',
-  'free_production'
+  'free_production',
+  // V2: voz. `listen_repeat` é ouvir e escolher; `speak_sentence` é ler em voz alta.
+  'listen_repeat',
+  'speak_sentence'
 ])
 
 export const generatedExerciseSchema = z
@@ -123,11 +126,12 @@ export const generatedExerciseSchema = z
     // M6 (D3/D4): o contrato de múltipla escolha fecha aqui — 4 opções e a
     // resposta correta **dentro** delas. Gabarito fora das opções é exercício
     // impossível, e modelo fraco faz isso direto.
-    if (exercise.type !== 'multiple_choice') return
+    // V2: `listen_repeat` é a mesma forma, só que a resposta vem do ouvido.
+    if (exercise.type !== 'multiple_choice' && exercise.type !== 'listen_repeat') return
     if (exercise.options.length !== 4) {
       ctx.addIssue({
         code: 'custom',
-        message: 'multiple_choice exige exatamente 4 opções',
+        message: `${exercise.type} exige exatamente 4 opções`,
         path: ['options']
       })
     } else if (!exercise.options.includes(exercise.answer)) {
@@ -137,6 +141,12 @@ export const generatedExerciseSchema = z
         path: ['answer']
       })
     }
+  })
+
+  .refine((exercise) => exercise.type !== 'speak_sentence' || exercise.answer.trim().length >= 3, {
+    // V2: sem frase-alvo não há pronúncia para pontuar.
+    message: 'speak_sentence precisa de uma frase para falar',
+    path: ['answer']
   })
 
 export const exerciseSetSchema = z.object({

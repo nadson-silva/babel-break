@@ -582,7 +582,9 @@ async function correctWithModel(
     const graded = await generateStructured(correctionSetSchema, {
       system: prompt.system,
       user: prompt.user,
-      temperature: 0.2
+      temperature: 0.2,
+      // V2: a passada de correção roda no modelo rápido (papel `quick`).
+      role: 'quick'
     })
 
     return {
@@ -645,7 +647,8 @@ async function maybeSummarize(profileId: number, conversationId: number): Promis
     const result = await generateStructured(conversationSummarySchema, {
       system: prompt.system,
       user: prompt.user,
-      temperature: 0.3
+      temperature: 0.3,
+      role: 'quick'
     })
 
     getDb()

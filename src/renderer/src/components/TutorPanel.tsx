@@ -6,11 +6,13 @@ import type {
   Correction,
   RecapView,
   ScenarioFeedbackView,
-  ScenarioView
+  ScenarioView,
+  VoiceStatus
 } from '../../../shared/types'
 import { t } from '../i18n'
 import { targetLabel, targetLanguage } from '../lang'
 import { CorrectionList } from './CorrectionList'
+import { MicDictate, PlayButton } from './SpeechControls'
 import { ScenarioBanner, ScenarioFeedbackPanel } from './ScenarioPanel'
 
 interface TutorPanelProps {
@@ -33,6 +35,24 @@ interface UiMessage {
   cancelled?: boolean
   corrections?: Correction[]
   recast?: string
+}
+
+/** V2: o que o provedor faz com voz hoje (uma consulta por painel aberto). */
+function useVoiceStatus(): VoiceStatus | null {
+  const [status, setStatus] = useState<VoiceStatus | null>(null)
+  useEffect(() => {
+    let alive = true
+    void window.api.voice
+      .status()
+      .then((next) => {
+        if (alive) setStatus(next)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [])
+  return status
 }
 
 function newId(): string {
@@ -66,6 +86,8 @@ export function TutorPanel({
   const [scenarioRun, setScenarioRun] = useState<ScenarioFeedbackView | null>(null)
   const [scenarioLessonId, setScenarioLessonId] = useState<number | null>(null)
   const [closing, setClosing] = useState(false)
+  // V2: voz disponível = ouvir a resposta do tutor e ditar a própria fala.
+  const voice = useVoiceStatus()
   const [refreshing, setRefreshing] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -374,6 +396,13 @@ export function TutorPanel({
                       <CorrectionList corrections={message.corrections} recast={message.recast} />
                     </div>
                   )}
+
+                  {/* V2: ouvir a resposta do tutor (pronúncia modelo, não texto). */}
+                  {message.role === 'assistant' && !message.pending && voice?.tts && message.content.trim() && (
+                    <div className="mt-2">
+                      <PlayButton text={message.content} compact label={t.voice.play} />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -417,6 +446,13 @@ export function TutorPanel({
             className="max-h-40 min-h-[52px] flex-1 resize-none rounded-xl border border-line bg-panel px-4 py-3 text-sm leading-relaxed text-ink outline-none placeholder:text-faint focus:border-accent/50"
           />
           <div className="flex shrink-0 flex-col gap-2">
+            {voice?.asr && (
+              <MicDictate
+                onText={(text) =>
+                  setInput((current) => (current.trim() ? `${current.trim()} ${text}` : text))
+                }
+              />
+            )}
             {busy ? (
               <button
                 type="button"

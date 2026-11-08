@@ -11,7 +11,16 @@ const DEFAULTS: AppSettings = {
   focusMix: 0.3,
   uiLang: 'pt-BR',
   // M5: aquecer o próximo conteúdo provável quando o app está ocioso.
-  pregenerate: true
+  pregenerate: true,
+  // V2: papéis de modelo vazios = herdar o modelo do provedor.
+  quickModel: '',
+  strongModel: '',
+  voiceEnabled: true,
+  ttsModel: '',
+  asrModel: '',
+  voiceName: 'Kore',
+  speechRate: 'normal',
+  preferSystemVoices: false
 }
 
 const SETTINGS_KEY = 'settings'

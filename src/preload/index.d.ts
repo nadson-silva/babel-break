@@ -47,9 +47,19 @@ import type {
   TutorSendRequest,
   TutorTurnResult,
   DbStatusView,
+  AudioCacheStats,
   ExportFileView,
+  JobEvent,
+  JobView,
+  ListeningResultView,
   ImportResultView,
   InspectView,
+  SpeechAudioView,
+  SpeechGradeRequest,
+  SpeechGradeView,
+  SpeechHistoryView,
+  VoicePhraseView,
+  VoiceStatus,
   LogPathView
 } from '../shared/types'
 
@@ -112,6 +122,30 @@ declare global {
         pickFile(): Promise<string | null>
         import(input: { path?: string; json?: string; name?: string | null; switch?: boolean }): Promise<ImportResultView>
         activeProfile(): Promise<number>
+      }
+      /** V2: voz (TTS/ASR/pronúncia) e cache de áudio. */
+      voice: {
+        status(): Promise<VoiceStatus>
+        speak(input: { text: string; lang?: string; requestId?: string }): Promise<SpeechAudioView>
+        grade(input: SpeechGradeRequest): Promise<SpeechGradeView>
+        listen(input: {
+          exerciseId: number
+          response: string
+          target: string
+          lessonId?: number | null
+          latencyMs?: number
+        }): Promise<ListeningResultView>
+        phrases(limit?: number): Promise<VoicePhraseView[]>
+        dictate(input: { mime: string; audio: string; requestId?: string }): Promise<{ ok: boolean; text: string; error?: string }>
+        history(limit?: number): Promise<SpeechHistoryView>
+        cache(): Promise<AudioCacheStats>
+        clearCache(): Promise<number>
+      }
+      /** V2 (E9): jobs longos com progresso e cancelamento. */
+      job: {
+        list(): Promise<JobView[]>
+        cancel(jobId: string): Promise<boolean>
+        onEvent(callback: (event: JobEvent) => void): () => void
       }
       review: {
         state(limit?: number): Promise<ReviewState>

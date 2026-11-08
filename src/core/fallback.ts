@@ -407,10 +407,18 @@ function spotError(entry: ErrorFocusEntry, locale: PromptLocale): GeneratedExerc
   }
 }
 
+export interface VoiceFlags {
+  /** Síntese disponível (o app consegue tocar a frase). */
+  tts: boolean
+  /** Transcrição disponível (o app consegue pontuar a fala). */
+  asr: boolean
+}
+
 export function fallbackExercises(
   content: LessonContentOutput,
   errors: ErrorFocusEntry[] = [],
-  locale: PromptLocale = DEFAULT_LOCALE
+  locale: PromptLocale = DEFAULT_LOCALE,
+  voice: VoiceFlags = { tts: false, asr: false }
 ): ExerciseSetOutput {
   // M6 (B12): guardas — `vocab[1..3]` e `examples[0]` eram lidos sem checar
   // tamanho; conteúdo degenerado (vocabulário vazio) derrubava a geração.
@@ -522,5 +530,63 @@ export function fallbackExercises(
     })
   }
 
-  return { exercises: exercises.slice(0, 8) }
+  // V2: voz também tem caminho determinístico. A frase falada vem do próprio
+  // conteúdo da lição (qualquer idioma, já que o conteúdo existe), então ouvir e
+  // repetir funciona offline — o score de pronúncia é que depende do ASR.
+  if (voice.tts) {
+    const spoken = content.examples.filter((example) => example.target.trim().length > 0)
+    const speakSource = spoken[1] ?? spoken[0]
+    if (speakSource) {
+      exercises.push({
+        type: 'speak_sentence',
+        instruction: runtimeTextForLocale(locale, 'fb.speak.instruction'),
+        prompt: speakSource.target,
+        options: [],
+        tokens: [],
+        answer: speakSource.target,
+        alternatives: [],
+        explanation: runtimeTextForLocale(locale, 'fb.speak.explanation', { native: speakSource.native }),
+        targetTags: []
+      })
+    }
+
+    // Ouvir-e-escolher precisa de 4 alternativas reais: sem elas, não se gera.
+    const listenSource = spoken[0]
+    const distractors = [...new Set(spoken.slice(1).map((example) => example.target))]
+    if (listenSource && distractors.length >= 3) {
+      const options = shuffle([listenSource.target, ...distractors.slice(0, 3)], seed + 7)
+      exercises.push({
+        type: 'listen_repeat',
+        instruction: runtimeTextForLocale(locale, 'fb.listen.instruction'),
+        prompt: runtimeTextForLocale(locale, 'fb.listen.prompt'),
+        options,
+        tokens: [],
+        answer: listenSource.target,
+        alternatives: [],
+        explanation: runtimeTextForLocale(locale, 'fb.listen.explanation', { native: listenSource.native }),
+        targetTags: []
+      })
+    }
+  }
+
+  // O teto do contrato são 8 exercícios. Quando sobra, sai primeiro o
+  // múltipla-escolha extra (o gerador já faz dois) — nunca a prática de voz,
+  // que é o que o aluno pediu ao habilitar o provedor com fala.
+  const max = 8
+  while (exercises.length > max) {
+    let drop = -1
+    for (let index = exercises.length - 1; index >= 0; index -= 1) {
+      const item = exercises[index]
+      const isExtraChoice =
+        item != null && item.type === 'multiple_choice' && exercises.filter((entry) => entry.type === 'multiple_choice').length > 1
+      if (isExtraChoice) {
+        drop = index
+        break
+      }
+    }
+    if (drop >= 0) exercises.splice(drop, 1)
+    else exercises.pop()
+  }
+
+  return { exercises }
 }

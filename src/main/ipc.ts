@@ -9,6 +9,8 @@ import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
 import { registerPrewarmIpc } from './prewarm'
 import { registerPortableIpc } from './portable'
+import { registerVoiceIpc } from './voice'
+import { registerJobsIpc } from './jobs-ipc'
 import { registerReportsIpc } from './reports'
 import { refreshProviderStatus } from './provider-status'
 import { registerScenarioIpc } from './scenario'
@@ -16,6 +18,10 @@ import { registerTracksIpc } from './tracks'
 import { emitStudentEvent } from './events'
 import { logFilePath } from './log'
 import { getProvider } from './providers'
+import { roleViews } from './ai'
+import { GEMINI_TTS_MODELS } from './providers/gemini'
+import { GEMINI_VOICES } from '../core/voice'
+import { voiceStatus } from './voice'
 import {
   clearGeminiApiKey,
   getSecureStorageInfo,
@@ -25,8 +31,9 @@ import {
 import { getSettings, updateSettings } from './settings'
 
 async function settingsPayload(): Promise<SettingsPayload> {
+  const settings = getSettings()
   return {
-    ...getSettings(),
+    ...settings,
     hasGeminiKey: await hasGeminiApiKey(),
     secureStorage: await getSecureStorageInfo(),
     runtime: {
@@ -34,7 +41,15 @@ async function settingsPayload(): Promise<SettingsPayload> {
       chrome: process.versions.chrome ?? '—',
       node: process.versions.node,
       platform: process.platform
-    }
+    },
+    // V2: a tela de configurações diz qual modelo está em cada papel em vez de
+    // mostrar três campos iguais sem contexto.
+    roles: roleViews(),
+    voice: voiceStatus(),
+    ttsModels: settings.provider === 'gemini' ? GEMINI_TTS_MODELS : [],
+    voices: settings.provider === 'gemini' ? GEMINI_VOICES.map((voice) => voice.id) : [],
+    // O SO é quem sabe se tem voz instalada; o main dá a pista, o renderer confirma.
+    systemVoicesPossible: true
   }
 }
 
@@ -120,4 +135,6 @@ export function registerIpcHandlers(): void {
   registerReportsIpc()
   registerPrewarmIpc()
   registerPortableIpc()
+  registerVoiceIpc()
+  registerJobsIpc()
 }

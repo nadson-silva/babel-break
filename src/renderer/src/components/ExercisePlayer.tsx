@@ -3,10 +3,13 @@ import type { JSX } from 'react'
 import type { ExerciseType, ExerciseView, GradeFeedback } from '../../../shared/types'
 import { t } from '../i18n'
 import { targetIsCjk, targetLabel, targetLanguage } from '../lang'
+import { PlayButton, SpeechRecorder } from './SpeechControls'
 import { ReportButton } from './ReportButton'
 
 interface ExercisePlayerProps {
   exercises: ExerciseView[]
+  /** V2: lição atual (os exercícios de voz precisam dela para o histórico). */
+  lessonId?: number | null
   /** Chamado ao passar do último exercício, com o placar da rodada. */
   onComplete: (result: { correct: number; total: number }) => void | Promise<void>
   onSkip?: () => void
@@ -18,6 +21,30 @@ interface ExercisePlayerProps {
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
+}
+
+/**
+ * V2: responder de ouvido entra na mesma conta (tentativa + score 0–1), mas pelo
+ * caminho de escuta — que mexe na habilidade `listening`.
+ */
+async function voiceListenGrade(
+  exercise: ExerciseView,
+  response: string,
+  latencyMs: number
+): Promise<GradeFeedback> {
+  const result = await window.api.voice.listen({
+    exerciseId: exercise.id,
+    response,
+    target: exercise.speechText ?? '',
+    lessonId: exercise.lessonId ?? null,
+    latencyMs
+  })
+  return {
+    correct: result.correct,
+    score: result.score,
+    feedback: result.feedback,
+    errorTags: result.correct ? [] : ['listening']
+  }
 }
 
 /** Rótulos no idioma da interface (M4) — o "inglês" fixo virou o idioma do perfil. */
@@ -34,6 +61,11 @@ function typeLabel(type: ExerciseType): string {
       return t.player.typeOrder
     case 'free_production':
       return t.player.typeFreeProduction
+    // V2: os dois tipos de voz.
+    case 'listen_repeat':
+      return t.player.typeListen
+    case 'speak_sentence':
+      return t.player.typeSpeak
     default:
       return type
   }
@@ -41,6 +73,7 @@ function typeLabel(type: ExerciseType): string {
 
 export function ExercisePlayer({
   exercises,
+  lessonId = null,
   onComplete,
   onSkip,
   completeLabel,
@@ -55,10 +88,16 @@ export function ExercisePlayer({
   const [error, setError] = useState<string | null>(null)
   const [results, setResults] = useState<boolean[]>([])
   const [sending, setSending] = useState(false)
+  const exerciseLessonId = lessonId ?? exercises[0]?.lessonId ?? null
   const startedAt = useRef(Date.now())
 
   const exercise = exercises[index]
   const isOrder = exercise?.type === 'order'
+  // V2: `listen_repeat` é múltipla escolha com o áudio como enunciado;
+  // `speak_sentence` se responde falando, e o score vem do main.
+  const isListen = exercise?.type === 'listen_repeat'
+  const isSpeak = exercise?.type === 'speak_sentence'
+  const showsOptions = exercise != null && (exercise.type === 'multiple_choice' || isListen)
   const total = exercises.length
 
   useEffect(() => {
@@ -100,11 +139,13 @@ export function ExercisePlayer({
     setError(null)
 
     try {
-      const graded = await window.api.learning.lesson.answer({
-        exerciseId: exercise.id,
-        response,
-        latencyMs: Date.now() - startedAt.current
-      })
+      const graded = isListen
+        ? await voiceListenGrade(exercise, response, Date.now() - startedAt.current)
+        : await window.api.learning.lesson.answer({
+            exerciseId: exercise.id,
+            response,
+            latencyMs: Date.now() - startedAt.current
+          })
       setFeedback(graded)
       setResults((previous) => [...previous, graded.correct])
     } catch (loadError) {
@@ -161,6 +202,17 @@ export function ExercisePlayer({
         {exercise.prompt}
       </p>
 
+      {/* V2: o áudio É o enunciado — sem ele o aluno lê a resposta. */}
+      {(isListen || isSpeak) && exercise.speechText && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <PlayButton text={exercise.speechText} label={t.player.playAudio} />
+          {isListen && <span className="text-[11px] text-faint">{t.player.listenNoPeek}</span>}
+          {isSpeak && exercise.speechHint && (
+            <span className="text-[11px] text-faint">{exercise.speechHint}</span>
+          )}
+        </div>
+      )}
+
       {/* M5: gabarito errado / enunciado confuso tem consequência imediata —
           o exercício sai da prática e a fila de aquecimento repõe o item. */}
       <div className="mt-2">
@@ -168,7 +220,7 @@ export function ExercisePlayer({
       </div>
 
       <div className="mt-5">
-        {exercise.type === 'multiple_choice' && (
+        {showsOptions && (
           <div className="space-y-2">
             {exercise.options.map((option, optionIndex) => {
               const selected = answer === option
@@ -262,6 +314,27 @@ export function ExercisePlayer({
             disabled={Boolean(feedback)}
             placeholder={t.player.answerPlaceholder.replace('{lang}', targetLabel())}
             className="w-full rounded-xl border border-line bg-panel-2 px-4 py-3 text-sm text-ink outline-none placeholder:text-faint focus:border-accent/50 disabled:opacity-70"
+          />
+        )}
+
+        {isSpeak && (
+          <SpeechRecorder
+            target={exercise.speechText ?? exercise.prompt}
+            kind="speak"
+            exerciseId={exercise.id}
+            lessonId={exerciseLessonId ?? null}
+            allowTyped={false}
+            onScored={(result) => {
+              setFeedback({
+                correct: result.passed,
+                score: result.score,
+                feedback: result.summary,
+                corrected: result.transcript ?? undefined,
+                errorTags: result.tags
+              })
+              setResults((previous) => [...previous, result.passed])
+            }}
+            onProblem={setError}
           />
         )}
 

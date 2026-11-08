@@ -245,6 +245,7 @@ export function GuidedScreen({ settings, session, onExit }: GuidedScreenProps): 
               </div>
               <ExercisePlayer
                 exercises={lesson.exercises}
+                lessonId={lesson.lesson.id}
                 completeLabel={t.guided.tutorCta}
                 onComplete={async ({ correct, total }) => {
                   await finishPractice(correct, total)

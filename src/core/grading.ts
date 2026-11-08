@@ -1,4 +1,4 @@
-import type { CefrLevel, ExerciseType, GradeFeedback } from '../shared/types'
+import type { CefrLevel, ExerciseType, GradeFeedback, SkillId } from '../shared/types'
 import { runtimeText } from './runtime-text'
 
 export interface ExerciseAnswerKey {
@@ -71,7 +71,8 @@ export function gradeDeterministic(
 ): GradeFeedback | null {
   const explanation = answerKey.explanation?.trim()
 
-  if (type === 'multiple_choice' || type === 'cloze' || type === 'order') {
+  // V2: `listen_repeat` é múltipla escolha com a resposta entrando pelo ouvido.
+  if (type === 'multiple_choice' || type === 'listen_repeat' || type === 'cloze' || type === 'order') {
     const correct = matches(answerKey, response, lang)
     return {
       correct,
@@ -99,8 +100,32 @@ export function gradeDeterministic(
   return null
 }
 
+/** Tipos que precisam de juízo de valor (tradução livre e produção livre). */
 export function needsAiGrading(type: ExerciseType): boolean {
   return type === 'translate' || type === 'free_production'
+}
+
+/** V2: exercícios respondidos por áudio — o texto do aluno não é a resposta. */
+export function isVoiceExercise(type: ExerciseType | string): boolean {
+  return type === 'listen_repeat' || type === 'speak_sentence'
+}
+
+/** V2: quais habilidades cada tipo exercita (voz alimenta as linhas mortas). */
+export function skillsForType(type: ExerciseType): SkillId[] {
+  switch (type) {
+    case 'listen_repeat':
+      return ['listening', 'vocab']
+    case 'speak_sentence':
+      return ['speaking', 'vocab']
+    case 'translate':
+    case 'free_production':
+      return ['writing', 'grammar']
+    case 'cloze':
+    case 'multiple_choice':
+      return ['grammar', 'vocab']
+    case 'order':
+      return ['grammar', 'vocab']
+  }
 }
 
 export function buildModelAnswerHint(

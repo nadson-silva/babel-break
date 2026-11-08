@@ -59,12 +59,16 @@ import {
 import { generateStructured } from './ai'
 import { getDb, schema } from './db'
 import { emitStudentEvent } from './events'
+import { startKeyedJob } from './jobs'
+import { cancelJobsExceptProfile } from './jobs'
 import { runtimeText } from '../core/runtime-text'
 import { errorHints, focusFor, recordCorrections } from './notebook'
 import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors, dueCount } from './review'
 import { ownerOfLesson, openTrackLessons, trackContextOf, type LessonOwner } from './tracks'
 import { applyReestimation, cancelTurnsExceptProfile } from './tutor'
+import { voiceCapabilityFlags } from './voice'
 import { exerciseForProfile, lessonIdsForProfile } from './scope'
+import { skillSample } from '../core/score'
 import {
   PROFILE_COLORS,
   activeProfileId,
@@ -110,6 +114,8 @@ interface ExercisePayload {
   /** M6 (D1): contrato com que o exercício foi gerado (ver `core/schemas.ts`). */
   promptVersion?: number
   schemaVersion?: number
+  /** V2: apoio exibido junto da frase falada (tradução do `speak_sentence`). */
+  speechHint?: string | null
 }
 
 function parseJson<T>(value: string | null | undefined): T | null {
@@ -330,18 +336,19 @@ export function curriculumView(profileId = activeProfileId()): CurriculumView {
 }
 
 /**
- * V2: um job por perfil. A versão antiga tinha `curriculumJob` único, e com dois
- * perfis o segundo pedindo currículo recebia o currículo do primeiro.
+ * V2: um job por perfil (`startKeyedJob` com chave `curriculum:<profileId>`). A
+ * versão antiga tinha `curriculumJob` único, e com dois perfis o segundo pedindo
+ * currículo recebia o currículo do primeiro.
  */
-const curriculumJobs = new Map<number, Promise<CurriculumView>>()
-
 export function generateCurriculum(profileId = activeProfileId()): Promise<CurriculumView> {
-  const pending = curriculumJobs.get(profileId)
-  if (pending) return pending
-
-  const job = (async () => {
+  const job = startKeyedJob(`curriculum:${profileId}`, {
+    kind: 'curriculum:generate',
+    profileId,
+    label: runtimeText(requireProfileRow(profileId).nativeLang, 'job.curriculum'),
+    run: async (context) => {
     const db = getDb()
     const profile = requireProfileRow(profileId)
+    context.progress(0.05)
 
     if (unitCount(profile.id) > 0) return curriculumView(profile.id)
 
@@ -354,7 +361,10 @@ export function generateCurriculum(profileId = activeProfileId()): Promise<Curri
       plan = await generateStructured(curriculumSchema, {
         system: prompt.system,
         user: prompt.user,
-        temperature: 0.3
+        temperature: 0.3,
+        role: 'strong',
+        // V2 (E9): o cancelamento do job mata a geração do currículo.
+        signal: context.signal
       })
     } catch (error) {
       if (!deterministicContentSupported(profile.targetLang)) {
@@ -408,12 +418,11 @@ export function generateCurriculum(profileId = activeProfileId()): Promise<Curri
       }
     })
 
+    context.progress(1)
     return curriculumView(profile.id)
-  })().finally(() => {
-    curriculumJobs.delete(profileId)
+    }
   })
 
-  curriculumJobs.set(profileId, job)
   return job
 }
 
@@ -467,15 +476,24 @@ function exerciseIsCurrent(row: { payload: string }): boolean {
 
 function toExerciseView(row: ExerciseRow): ExerciseView {
   const payload = exercisePayload(row)
+  const type = row.type as ExerciseType
+  const answerKey = parseAnswerKey(row)
+  // V2: a frase que o áudio deve dizer vem do gabarito, nunca do enunciado — em
+  // `listen_repeat` o enunciado não pode revelar a resposta que se ouve.
+  const isVoice = type === 'listen_repeat' || type === 'speak_sentence'
+
   return {
     id: row.id,
-    type: row.type as ExerciseType,
+    type,
+    lessonId: row.lessonId,
     instruction: payload.instruction,
     prompt: payload.prompt,
     options: payload.options ?? [],
     tokens: payload.tokens ?? [],
     source: row.source === 'ai' || row.source === 'fallback' ? row.source : null,
-    targetTags: payload.targetTags ?? parseJson<{ targetTags?: string[] }>(row.answerKey)?.targetTags ?? []
+    targetTags: payload.targetTags ?? parseJson<{ targetTags?: string[] }>(row.answerKey)?.targetTags ?? [],
+    speechText: isVoice ? answerKey.answer.trim() : null,
+    speechHint: isVoice ? (payload.speechHint ?? null) : null
   }
 }
 
@@ -503,7 +521,7 @@ function ensureLessonGeneratedOnce(
   lesson: LessonRow,
   profile: ProfileRow,
   owner: LessonOwner,
-  options: { forceExercises?: boolean; prewarm?: boolean; minExercises?: number } = {}
+  options: { forceExercises?: boolean; prewarm?: boolean; minExercises?: number; signal?: AbortSignal } = {}
 ): Promise<ErrorFocusEntry[]> {
   const pending = lessonJobs.get(lesson.id)
 
@@ -548,6 +566,8 @@ async function ensureLessonGenerated(
     prewarm?: boolean
     /** M5: mínimo de exercícios utilizáveis; abaixo disso a fila só repõe o que falta. */
     minExercises?: number
+    /** V2 (E9): cancelamento do job — um "parar" do aluno mata o request. */
+    signal?: AbortSignal
   } = {}
 ): Promise<ErrorFocusEntry[]> {
   const db = getDb()
@@ -580,7 +600,10 @@ async function ensureLessonGenerated(
       const generated = await generateStructured(lessonContentSchema, {
         system: prompt.system,
         user: prompt.user,
-        temperature: 0.4
+        temperature: 0.4,
+        role: 'strong',
+        // V2 (E9): o cancelamento do job chega até o request do provedor.
+        ...(options.signal ? { signal: options.signal } : {})
       })
       // O nível é do currículo/trilha — um modelo fraco não rebaixa nem promove a lição.
       resolved = {
@@ -692,13 +715,16 @@ async function ensureLessonGenerated(
   const shortfall = Math.max(1, minExercises - usable.length)
 
   const hints = recentErrorHints(profile.id)
+  // V2: com voz disponível o lote ganha ouvir + falar; sem voz, nada de
+  // exercício de pronúncia que o aluno não consegue responder.
   const prompt = exercisePrompt({
     content: exerciseLevel,
     level: content.level,
     goal: profile.goal ?? '',
     errors: hints,
     locale,
-    track: track ? { title: track.title, vocabulary: track.vocabulary } : null
+    track: track ? { title: track.title, vocabulary: track.vocabulary } : null,
+    voice: voiceCapabilityFlags()
   })
 
   let generated: ExerciseSetOutput
@@ -708,7 +734,9 @@ async function ensureLessonGenerated(
     generated = await generateStructured(exerciseSetSchema, {
       system: prompt.system,
       user: prompt.user,
-      temperature: 0.4
+      temperature: 0.4,
+      role: 'strong',
+      ...(options.signal ? { signal: options.signal } : {})
     })
     source = 'ai'
   } catch (error) {
@@ -726,7 +754,8 @@ async function ensureLessonGenerated(
       '[learning] geração de exercícios falhou, usando exercícios determinísticos:',
       error instanceof Error ? error.message : error
     )
-    generated = fallbackExercises(exerciseLevel, focus, locale)
+    const voice = voiceCapabilityFlags()
+      generated = fallbackExercises(exerciseLevel, focus, locale, { tts: voice.tts, asr: voice.asr })
     source = 'fallback'
   }
 
@@ -785,6 +814,8 @@ async function ensureLessonGenerated(
       options: options_,
       tokens,
       targetTags: exercise.targetTags ?? [],
+      // V2: apoio da frase falada (tradução do "fale em voz alta").
+      speechHint: exercise.type === 'speak_sentence' ? speakHintFor(exerciseLevel) : null,
       // M6 (D1): carimbo do contrato — rascunhos sem versão são stale.
       promptVersion: PROMPT_VERSION,
       schemaVersion: SCHEMA_VERSION
@@ -840,6 +871,27 @@ function parseAnswerKey(row: ExerciseRow): ExerciseAnswerKey {
       explanation: ''
     }
   )
+}
+
+/** Média 0–1 das tentativas de um tipo de exercício nesta lição (null = none). */
+function typeAverage(
+  rows: Array<{ id: number; type: string }>,
+  latest: Map<number, { correct: boolean; score: number }>,
+  type: string
+): number | null {
+  const values = rows
+    .filter((row) => row.type === type)
+    .map((row) => latest.get(row.id)?.score)
+    .filter((value): value is number => typeof value === 'number')
+
+  if (values.length === 0) return null
+  return values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
+/** Tradução do primeiro termo do vocabulário: o apoio curto da frase falada. */
+function speakHintFor(content: LessonContentOutput): string | null {
+  const first = content.vocabulary[0]
+  return first ? `${first.term} · ${first.translation}` : null
 }
 
 /** Lições com menos disto voltam para a fila de aquecimento (M5). */
@@ -950,14 +1002,28 @@ export async function prewarmLesson(lessonId: number, profileId = activeProfileI
   }
 }
 
-export async function openLesson(lessonId: number, profileId = activeProfileId()): Promise<LessonDetail> {
+export async function openLesson(
+  lessonId: number,
+  profileId = activeProfileId(),
+  options: { requestId?: string } = {}
+): Promise<LessonDetail> {
   const db = getDb()
   const profile = requireProfileRow(profileId)
   const owned = getOwnedLesson(lessonId, profile.id)
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  const focus = await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner)
+  // V2 (E9): a geração longa é um job nomeado — a tela mostra "gerando o
+  // conteúdo da lição" com progresso e pode cancelar. `startKeyedJob` também é o
+  // mutex: duas aberturas da mesma lição pagam uma geração só.
+  const focus = await startKeyedJob(`lesson:generate:${lessonId}`, {
+    kind: 'lesson:generate',
+    profileId: profile.id,
+    label: runtimeText(profile.nativeLang, 'job.lesson'),
+    requestId: options.requestId,
+    run: (job) =>
+      ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, { signal: job.signal })
+  })
 
   const fresh = getOwnedLesson(lessonId, profile.id)
   if (!fresh) throw new Error('Lição não encontrada.')
@@ -1036,15 +1102,26 @@ export async function openLesson(lessonId: number, profileId = activeProfileId()
  */
 export async function regenerateLessonExercises(
   lessonId: number,
-  profileId = activeProfileId()
+  profileId = activeProfileId(),
+  options: { requestId?: string } = {}
 ): Promise<LessonDetail> {
   const profile = requireProfileRow(profileId)
   const owned = getOwnedLesson(lessonId, profile.id)
 
   if (!owned) throw new Error('Lição não encontrada.')
 
-  await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, { forceExercises: true })
-  return openLesson(lessonId, profile.id)
+  await startKeyedJob(`lesson:generate:${lessonId}`, {
+    kind: 'lesson:generate',
+    profileId: profile.id,
+    label: runtimeText(profile.nativeLang, 'job.exercises'),
+    requestId: options.requestId,
+    run: (job) =>
+      ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, {
+        forceExercises: true,
+        signal: job.signal
+      })
+  })
+  return openLesson(lessonId, profile.id, options)
 }
 
 export async function answerExercise(
@@ -1075,6 +1152,12 @@ export async function answerExercise(
   const type = exercise.type as ExerciseType
   const response = input.response.trim()
 
+  // V2: exercício de voz não se responde por texto — a nota vem do alinhamento
+  // com a transcrição (`voice:grade`), não de um palpite do modelo.
+  if (type === 'speak_sentence') {
+    throw new Error(runtimeText(profile.nativeLang, 'error.voiceOnly'))
+  }
+
   if (!response) throw new Error('Escreva ou monte uma resposta antes de verificar.')
 
   // M6 (B7/B8): veredicto no idioma do aluno, e a comparacão de texto respeita
@@ -1099,7 +1182,9 @@ export async function answerExercise(
       const graded = await generateStructured(gradeSchema, {
         system: prompt.system,
         user: prompt.user,
-        temperature: 0.2
+        temperature: 0.2,
+        // V2: corrigir é o trabalho rápido — usa o modelo do papel `quick`.
+        role: 'quick'
       })
       feedback = {
         correct: graded.correct,
@@ -1152,24 +1237,24 @@ export function finishLesson(
   if (!getOwnedLesson(input.lessonId, profile.id)) throw new Error('Lição não encontrada.')
 
   const exerciseRows = db
-    .select({ id: schema.exercises.id })
+    .select({ id: schema.exercises.id, type: schema.exercises.type })
     .from(schema.exercises)
     .where(and(eq(schema.exercises.lessonId, input.lessonId), eq(schema.exercises.blocked, false)))
     .all()
 
   const exerciseIds = exerciseRows.map((row) => row.id)
 
-  const latestByExercise = new Map<number, { correct: boolean }>()
+  const latestByExercise = new Map<number, { correct: boolean; score: number }>()
   if (exerciseIds.length > 0) {
     const rows = db
-      .select()
+      .select({ exerciseId: schema.attempts.exerciseId, correct: schema.attempts.correct, score: schema.attempts.score })
       .from(schema.attempts)
       .where(inArray(schema.attempts.exerciseId, exerciseIds))
       .orderBy(asc(schema.attempts.id))
       .all()
 
     for (const row of rows) {
-      latestByExercise.set(row.exerciseId, { correct: row.correct })
+      latestByExercise.set(row.exerciseId, { correct: row.correct, score: row.score ?? (row.correct ? 1 : 0) })
     }
   }
 
@@ -1200,8 +1285,16 @@ export function finishLesson(
       .run()
   }
 
-  blendSkill(profile.id, 'grammar', score * 5)
-  blendSkill(profile.id, 'vocab', score * 5)
+  // V2 (D7): a conta da lição usa a mesma escala 0–1 → 0–5 em todo tipo, e os
+  // exercícios de voz finalmente alimentam `speaking`/`listening`, que na v1
+  // eram linhas mortas no painel.
+  blendSkill(profile.id, 'grammar', skillSample(score))
+  blendSkill(profile.id, 'vocab', skillSample(score))
+
+  const speakingAverage = typeAverage(exerciseRows, latestByExercise, 'speak_sentence')
+  const listeningAverage = typeAverage(exerciseRows, latestByExercise, 'listen_repeat')
+  if (speakingAverage != null) blendSkill(profile.id, 'speaking', skillSample(speakingAverage))
+  if (listeningAverage != null) blendSkill(profile.id, 'listening', skillSample(listeningAverage))
 
   // Fechamento da lição: vocabulário vira card SRS + erros recorrentes também.
   const lessonRow = db
@@ -1302,7 +1395,8 @@ export async function generatePlacement(
   const generated = await generateStructured(placementSchema, {
     system: prompt.system,
     user: prompt.user,
-    temperature: 0.4
+    temperature: 0.4,
+    role: 'strong'
   })
 
   const questions: StoredPlacementQuestion[] = generated.questions.map((question, index) => ({
@@ -1569,8 +1663,9 @@ export function registerLearningIpc(): void {
 
   handle('profile:switch', (_event, profileId: number) => {
     const row = setActiveProfile(profileId)
-    // V2: stream de outro perfil não continua rodando atrás da troca.
+    // V2: stream e geração longa de outro perfil não continuam atrás da troca.
     cancelTurnsExceptProfile(row.id)
+    cancelJobsExceptProfile(row.id)
     return profilesView(row.id)
   })
 

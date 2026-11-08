@@ -4,6 +4,7 @@ import type { CardView, LessonDetail, LessonResultView, ReviewRating } from '../
 import { t } from '../i18n'
 import { nativeLabel } from '../lang'
 import { ExercisePlayer } from '../components/ExercisePlayer'
+import { jobPercent, useJob } from '../lib/jobs'
 import { ReportButton } from '../components/ReportButton'
 import { ReviewQueue } from '../components/ReviewQueue'
 import { TargetText } from '../components/TargetText'
@@ -33,6 +34,8 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
   const [regenerating, setRegenerating] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
   const alive = useRef(true)
+  // V2 (E9): progresso/cancelamento da geração desta lição.
+  const job = useJob('lesson:generate')
 
   async function load(): Promise<void> {
     setLoadError(null)
@@ -153,6 +156,31 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
             <div className="mx-auto mb-4 size-10 animate-pulse rounded-full border-2 border-accent/30 border-t-accent" />
             <h2 className="text-sm font-semibold">{t.player.loadingTitle}</h2>
             <p className="mt-1.5 text-xs leading-relaxed text-muted">{t.player.loadingBody}</p>
+
+            {/* V2 (E9): geração longa tem nome, progresso e saída. */}
+            {job.event && (
+              <div className="mt-5">
+                <p className="text-xs text-ink">{job.event.label}</p>
+                <div className="mx-auto mt-2 h-1 w-56 overflow-hidden rounded-full bg-panel-2">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all"
+                    style={{ width: `${Math.max(6, jobPercent(job.event))}%` }}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={job.cancel}
+                  className="mt-3 rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+                >
+                  {t.jobs.cancel}
+                </button>
+              </div>
+            )}
+            {job.event?.state === 'error' && (
+              <p role="alert" className="mt-3 text-xs text-danger">
+                {job.event.message}
+              </p>
+            )}
           </div>
         </div>
       </div>
@@ -392,6 +420,7 @@ export function LessonScreen({ lessonId, onBack, onCompleted, onOpenScenario }: 
               // player, que guarda índice e respostas no próprio estado.
               key={detail.exercises[0]?.id ?? lessonId}
               exercises={detail.exercises}
+              lessonId={lessonId}
               onProgress={(index) => setDoneCount(index)}
               onComplete={async () => {
                 await completePractice()

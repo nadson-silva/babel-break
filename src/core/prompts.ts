@@ -171,6 +171,8 @@ export function exercisePrompt(input: {
   errors: ErrorHint[]
   locale: PromptLocale
   track?: { title: string; vocabulary: string[] } | null
+  /** V2: provedor do aluno tem voz? Adds os dois tipos de exercício de fala. */
+  voice?: { tts: boolean; asr: boolean } | null
 }): { system: string; user: string } {
   const { locale } = input
   const vocabulary = input.content.vocabulary
@@ -196,13 +198,14 @@ export function exercisePrompt(input: {
       `Objetivo: ${quoted(input.content.objective)}. Objetivo do aluno: ${input.goal.trim() ? quoted(input.goal) : 'conversação geral'}.`,
       `Dificuldade TRAVADA no nível ${input.level}: frases, vocabulário e temas desse nível — nada de rotina básica de A1/A2 em lição ${input.level}. Os enunciados devem girar em torno do ASSUNTO da lição, não de exemplos genéricos.`,
       `Vocabulário-alvo: ${vocabulary}.`,
-      'Inclua, nesta ordem, um de cada tipo: multiple_choice, cloze, order, translate, free_production e mais um multiple_choice.',
+      voiceMix(input.voice),
       'Regras por tipo:',
       `- multiple_choice: 4 options em ${locale.targetName}; answer deve ser EXATAMENTE o texto da opção correta.`,
       `- cloze: a resposta precisa ser deduzível do enunciado. prompt é uma frase em ${locale.targetName} com "___" no lugar da palavra, seguida da tradução da palavra que falta entre parênteses — ex.: "It is a ___ (delicada) situation for this scenario."; answer é a palavra que falta em ${locale.targetName}.`,
       orderRule,
       `- translate: prompt é uma frase em ${locale.nativeName} para traduzir ao ${locale.targetName}; answer é a tradução correta em ${locale.targetName}.`,
       `- free_production: o prompt mostra a fala em ${locale.targetName} à qual o aluno responde, entre aspas, seguida do que ele deve dizer em ${locale.nativeName} — ex.: 'Alguém pergunta: "<frase em ${locale.targetName}>". Responda que sim e diga quando foi.'; answer é uma resposta-modelo curta em ${locale.targetName}.`,
+      voiceRules(locale, input.voice),
       // Sem isso o feedback cita texto que o aluno nunca viu: "perguntas com
       // 'Have you ever...?'" num enunciado escrito só no idioma nativo.
       `O aluno vê apenas instruction e prompt: nada do que ele precisa para responder pode estar fora do prompt.`,
@@ -221,8 +224,33 @@ export function exercisePrompt(input: {
           ]
         : []),
       'Não repita a mesma frase em exercícios diferentes.'
-    ].join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
+}
+
+/** Ordem dos tipos pedida à IA — com voz, o bloco ganha ouvir e falar. */
+function voiceMix(voice: { tts: boolean; asr: boolean } | null | undefined): string {
+  if (!voice || !voice.tts) {
+    return 'Inclua, nesta ordem, um de cada tipo: multiple_choice, cloze, order, translate, free_production e mais um multiple_choice.'
+  }
+  return [
+    'Inclua, nesta ordem, um de cada tipo: multiple_choice, cloze, order, translate, free_production, listen_repeat e speak_sentence.',
+    voice.asr
+      ? 'listen_repeat e speak_sentence são de PRÁTICA DE VOZ: o aluno ouve (ou fala) — nunca um exercício escrito disfarçado.'
+      : 'listen_repeat (ouvir e escolher); não gere speak_sentence porque o app não consegue transcrever fala aqui.'
+  ].join(' ')
+}
+
+/** Regras por tipo de voz, no par de idiomas do perfil. */
+function voiceRules(locale: PromptLocale, voice: { tts: boolean; asr: boolean } | null | undefined): string | null {
+  if (!voice || !voice.tts) return null
+  const asr = voice.asr
+    ? `- speak_sentence: answer é a frase em ${locale.targetName} que o aluno deve LER EM VOZ ALTA (curta, no nível); prompt diz em ${locale.nativeName} o que a frase significa ou em que situação usá-la; options e tokens = [].`
+    : `- speak_sentence: não gere (sem transcrição de fala neste provedor).`
+  return `- listen_repeat: o app sintetiza o áudio de "answer"; answer é a frase falada em ${locale.targetName} e options são 4 frases em ${locale.targetName} plausíveis no nível (a correta é exatamente uma delas, igual a answer); prompt é uma instrução em ${locale.nativeName} para ouvir e escolher, SEM escrever a frase; explanation em ${locale.nativeName}.
+${asr}`
 }
 
 export function gradePrompt(input: {

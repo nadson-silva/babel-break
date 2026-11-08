@@ -8,6 +8,7 @@ import type {
   TracksView
 } from '../../../shared/types'
 import { t } from '../i18n'
+import { jobPercent, useJob } from '../lib/jobs'
 
 interface TracksScreenProps {
   settings: SettingsPayload
@@ -273,6 +274,8 @@ export function TracksScreen({
   const [lessons, setLessons] = useState<TrackPlanLesson[]>([])
   const [expanded, setExpanded] = useState<number | null>(null)
   const [busy, setBusy] = useState<'create' | 'approve' | null>(null)
+  // V2 (E9): o esboço da trilha é geração longa — progresso com nome e cancelamento.
+  const draftJob = useJob('track:draft')
   const [error, setError] = useState<string | null>(null)
   const started = useRef(false)
 
@@ -428,6 +431,22 @@ export function TracksScreen({
                 {busy === 'create' ? t.tracks.creating : t.tracks.createCta}
               </button>
             </div>
+
+            {draftJob.event && (
+              <div className="mt-3 flex items-center gap-3">
+                <p className="min-w-0 flex-1 truncate text-[11px] text-muted">{draftJob.event.label}</p>
+                <div className="h-1 w-24 overflow-hidden rounded-full bg-panel-2">
+                  <div className="h-full bg-accent" style={{ width: `${Math.max(8, jobPercent(draftJob.event))}%` }} />
+                </div>
+                <button
+                  type="button"
+                  onClick={draftJob.cancel}
+                  className="rounded-lg border border-line px-2.5 py-1 text-[11px] text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+                >
+                  {t.jobs.cancel}
+                </button>
+              </div>
+            )}
 
             {view && view.suggestions.length > 0 && (
               <div className="mt-3">

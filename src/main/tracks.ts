@@ -37,6 +37,7 @@ import { trackPlanPrompt } from '../core/prompts'
 import { trackPlanSchema } from '../core/schemas'
 import { generateStructured } from './ai'
 import { emitStudentEvent } from './events'
+import { startKeyedJob } from './jobs'
 import { runtimeText } from '../core/runtime-text'
 import { getDb, schema } from './db'
 import { activeProfileId } from './profiles'
@@ -272,10 +273,23 @@ export async function createTrackDraft(
 
   let plan: TrackPlanDraft
   try {
-    const raw = await generateStructured(trackPlanSchema, {
-      system: prompt.system,
-      user: prompt.user,
-      temperature: 0.35
+    // V2 (E9): rascunho de trilha é geração longa — vira job nomeado, com
+    // progresso na tela e cancelamento pelo id. A chave única também impede o
+    // aluno de pagar duas gerações clicando duas vezes.
+    const raw = await startKeyedJob(`track:draft:${profileId}`, {
+      kind: 'track:draft',
+      profileId,
+      label: runtimeText(profile.nativeLang, 'job.track'),
+      run: (job) => {
+        job.progress(0.15)
+        return generateStructured(trackPlanSchema, {
+          system: prompt.system,
+          user: prompt.user,
+          temperature: 0.35,
+          role: 'strong',
+          signal: job.signal
+        })
+      }
     })
     plan = draftOf(normalizeTrackPlan({ raw, objective, level, seedFill: offlineReady, nativeLang: profile.nativeLang }), objective, level, 'ai')
   } catch (error) {
