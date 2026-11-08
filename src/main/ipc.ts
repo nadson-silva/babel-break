@@ -8,6 +8,7 @@ import { registerHomeIpc } from './home'
 import { registerLearningIpc } from './learning'
 import { registerLoopIpc } from './loop'
 import { registerPrewarmIpc } from './prewarm'
+import { registerPortableIpc } from './portable'
 import { registerReportsIpc } from './reports'
 import { refreshProviderStatus } from './provider-status'
 import { registerScenarioIpc } from './scenario'
@@ -118,4 +119,5 @@ export function registerIpcHandlers(): void {
   registerDashboardIpc()
   registerReportsIpc()
   registerPrewarmIpc()
+  registerPortableIpc()
 }

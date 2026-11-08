@@ -12,6 +12,9 @@ import type {
   GradeFeedback,
   GuidedSession,
   GuidedStep,
+  ExportFileView,
+  ImportResultView,
+  InspectView,
   HomeState,
   LanguageOption,
   LessonDetail,
@@ -212,6 +215,17 @@ const api = {
     undoTarget: (kind: ReportKind, targetId: number): Promise<ReportItemView | null> =>
       ipcRenderer.invoke('report:undo-target', kind, targetId),
     list: (limit?: number): Promise<ReportsSummary> => ipcRenderer.invoke('report:list', limit)
+  },
+  /** V2: backup portável — exportar um perfil, conferir um arquivo, importar. */
+  data: {
+    export: (input: { profileId?: number; includeAudio?: boolean } = {}): Promise<ExportFileView> =>
+      ipcRenderer.invoke('data:export', input),
+    inspect: (input: { path?: string; json?: string } = {}): Promise<InspectView> =>
+      ipcRenderer.invoke('data:inspect', input),
+    pickFile: (): Promise<string | null> => ipcRenderer.invoke('data:pick-file'),
+    import: (input: { path?: string; json?: string; name?: string | null; switch?: boolean }): Promise<ImportResultView> =>
+      ipcRenderer.invoke('data:import', input),
+    activeProfile: (): Promise<number> => ipcRenderer.invoke('data:active-profile')
   },
   /** M5: pré-geração e cache de conteúdo. */
   cache: {

@@ -225,7 +225,28 @@ const CHANNEL_CONTRACTS = {
   'report:list': z.tuple([z.number().int().min(1).max(200).optional()]),
   'pregen:state': noArgs,
   'pregen:run': noArgs,
-  'cache:stats': noArgs
+  'cache:stats': noArgs,
+
+  // --- v2: backup portável ---------------------------------------------------
+  'data:export': z.tuple([
+    z
+      .object({
+        profileId: id.optional(),
+        includeAudio: z.boolean().optional()
+      })
+      .optional()
+  ]),
+  'data:inspect': z.tuple([z.object({ path: z.string().max(1_000).optional(), json: z.string().max(40_000_000).optional() }).optional()]),
+  'data:pick-file': noArgs,
+  'data:import': z.tuple([
+    z.object({
+      path: z.string().max(1_000).optional(),
+      json: z.string().max(40_000_000).optional(),
+      name: z.string().max(80).nullable().optional(),
+      switch: z.boolean().optional()
+    })
+  ]),
+  'data:active-profile': noArgs
 } satisfies Record<string, z.ZodType<unknown[]>>
 
 export type IpcChannel = keyof typeof CHANNEL_CONTRACTS

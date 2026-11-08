@@ -47,6 +47,9 @@ import type {
   TutorSendRequest,
   TutorTurnResult,
   DbStatusView,
+  ExportFileView,
+  ImportResultView,
+  InspectView,
   LogPathView
 } from '../shared/types'
 
@@ -101,6 +104,14 @@ declare global {
           remaining: number
           switchedTo: number | null
         }>
+      }
+      /** V2: backup portável (exportar, conferir, importar). */
+      data: {
+        export(input?: { profileId?: number; includeAudio?: boolean }): Promise<ExportFileView>
+        inspect(input?: { path?: string; json?: string }): Promise<InspectView>
+        pickFile(): Promise<string | null>
+        import(input: { path?: string; json?: string; name?: string | null; switch?: boolean }): Promise<ImportResultView>
+        activeProfile(): Promise<number>
       }
       review: {
         state(limit?: number): Promise<ReviewState>

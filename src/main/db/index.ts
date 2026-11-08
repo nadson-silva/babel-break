@@ -164,6 +164,26 @@ export function getDb(): BetterSQLite3Database<typeof schema> {
   return db
 }
 
+/**
+ * Alça crua do better-sqlite3. É o que `main/portable.ts` usa para despejar e
+ * recarregar tabelas inteiras (export/import) sem escrever 18 mappings no ORM —
+ * os nomes de coluna do arquivo são os nomes de coluna do SQLite.
+ */
+export function getDbHandle(): Database.Database {
+  if (!sqlite) throw new Error('Banco de dados não inicializado.')
+  return sqlite
+}
+
+/** Nº de migrações aplicadas — entra no carimbo do arquivo de backup. */
+export function appliedMigrationCount(): number {
+  try {
+    const row = getDbHandle().prepare('select count(*) as n from __drizzle_migrations').get() as { n?: number } | undefined
+    return Number(row?.n ?? 0)
+  } catch {
+    return 0
+  }
+}
+
 export function closeDatabase(): void {
   sqlite?.close()
   sqlite = null

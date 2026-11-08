@@ -41,3 +41,15 @@ export function testHandler(channel: string): Handler | undefined {
 export const BrowserWindow = class {}
 export const shell = { openExternal: (): void => undefined }
 export const safeStorage = { isEncryptionAvailable: (): boolean => false }
+
+/**
+ * V2: o processo main usa os diálogos de salvar/abrir arquivo (export/import).
+ * Nos testes nada abre janela — os caminhos são passados explicitamente, e o
+ * stub só precisa existir para o import nomeado não quebrar.
+ */
+export const dialog = {
+  showSaveDialog: (): Promise<{ canceled: boolean; filePath?: string }> =>
+    Promise.resolve({ canceled: true, filePath: undefined }),
+  showOpenDialog: (): Promise<{ canceled: boolean; filePaths: string[] }> =>
+    Promise.resolve({ canceled: true, filePaths: [] })
+}

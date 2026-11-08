@@ -81,7 +81,7 @@ export function ProfilesScreen({
               onClick={onOpenData}
               className="rounded-lg border border-line px-3 py-1.5 text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
             >
-              {t.profiles.title}
+              {t.data.title}
             </button>
           )}
           <button

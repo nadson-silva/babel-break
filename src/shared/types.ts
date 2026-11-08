@@ -803,6 +803,78 @@ export interface DashboardTrack {
   lastActivityAt: number | null
 }
 
+// --- V2: backup portável (export/import) ------------------------------------
+
+/** O que o app mostra sobre um arquivo de backup, antes de decidir importá-lo. */
+export interface ExportManifestView {
+  kind: 'profile' | 'app'
+  /** Versão do formato do arquivo. */
+  format: number
+  schemaVersion: number
+  promptVersion: number
+  /** Nº de migrações aplicadas quando o arquivo foi gravado. */
+  dbVersion: number
+  appVersion: string
+  exportedAt: number
+  includesAudio: boolean
+  audioRows: number
+  profile: {
+    name: string | null
+    color: string | null
+    targetLang: string
+    nativeLang: string
+    goal: string | null
+    cefr: string | null
+    focusMix: number
+    placementScore: number | null
+    onboardingCompletedAt: number | null
+  }
+  counts: Record<string, number>
+  /** Conteúdo que o app trata como velho: vai pela fila de regeneração. */
+  stale: { lessonContent: number; exercises: number }
+}
+
+/** Por que um backup não entra. Cada código tem uma frase na UI. */
+export type InspectFailure =
+  | 'no-source'
+  | 'not-json'
+  | 'shape'
+  | 'unknown-app'
+  | 'format-version'
+  | 'schema-version'
+  | 'orphan-rows'
+  | 'too-large'
+
+export type InspectView =
+  | {
+      ok: true
+      manifest: ExportManifestView
+      counts: Record<string, number>
+      warnings: string[]
+      notes: string[]
+    }
+  | { ok: false; code: InspectFailure; errors: string[] }
+
+export interface ExportFileView {
+  /** O usuário canceou o diálogo — não é erro. */
+  cancelled: boolean
+  path: string | null
+  bytes: number
+  manifest: ExportManifestView
+}
+
+export interface ImportResultView {
+  profileId: number
+  name: string | null
+  targetLang: string
+  nativeLang: string
+  counts: Record<string, number>
+  /** Linhas descartadas por id de fora do arquivo (nunca meia entrada). */
+  warnings: string[]
+  audioSkipped: number
+  stale: { lessonContent: number; exercises: number }
+}
+
 export interface DashboardView {
   generatedAt: number
   profile: ProfileView

@@ -20,6 +20,7 @@ import { LessonsScreen } from './screens/LessonsScreen'
 import { NotebookScreen } from './screens/NotebookScreen'
 import { ProgressScreen } from './screens/ProgressScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
+import { DataScreen } from './screens/DataScreen'
 import { ProfilesScreen } from './screens/ProfilesScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
@@ -339,6 +340,16 @@ export default function App(): JSX.Element {
           <ReviewScreen key={`review-${refreshKey}`} onChanged={refreshBadges} />
         ) : view === 'notebook' ? (
           <NotebookScreen key={`notebook-${refreshKey}`} />
+        ) : view === 'data' ? (
+          <DataScreen
+            key={`data-${refreshKey}`}
+            profiles={profiles}
+            onImported={() => {
+              void reload()
+              setRefreshKey((value) => value + 1)
+            }}
+            onOpenProfiles={() => navigate('profiles')}
+          />
         ) : view === 'profiles' ? (
           <ProfilesScreen
             key={`profiles-${refreshKey}`}
@@ -348,6 +359,7 @@ export default function App(): JSX.Element {
               setRefreshKey((value) => value + 1)
             }}
             onCreate={createProfile}
+            onOpenData={() => navigate('data')}
           />
         ) : view === 'progress' ? (
           <ProgressScreen key={`progress-${refreshKey}`} onOpenSettings={() => navigate('settings')} />
