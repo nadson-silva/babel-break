@@ -60,6 +60,13 @@ describe('contrato de entrada do IPC (M6/D2)', () => {
     // onboarding sem nível.
     await expect(invoke('profile:onboard', { goal: 'x' })).rejects.toThrow(/Payload inválido/)
 
+    // V2: canais de perfil também recusam payload fora do contrato.
+    await expect(invoke('profile:switch', '2')).rejects.toThrow(/Payload inválido/)
+    await expect(invoke('profile:switch', 0)).rejects.toThrow(/Payload inválido/)
+    await expect(invoke('profile:create', { name: 'x'.repeat(200) })).rejects.toThrow(/Payload inválido/)
+    await expect(invoke('profile:update', { profileId: 1, focusMix: 4 })).rejects.toThrow(/Payload inválido/)
+    await expect(invoke('profile:delete', { profileId: 1, acknowledged: 'sim' })).rejects.toThrow(/Payload inválido/)
+
     // set-gemini-key sem string.
     await expect(invoke('settings:set-gemini-key', 42)).rejects.toThrow(/Payload inválido/)
 

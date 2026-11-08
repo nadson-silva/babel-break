@@ -15,9 +15,12 @@ import type {
   OnboardingInput,
   PlacementResult,
   PlacementTest,
+  CreateProfileInput,
   ProfileState,
-  ProfileView,
+  ProfileSummary,
+  ProfilesView,
   SkillId,
+  UpdateProfileInput,
   UnitView
 } from '../shared/types'
 import type { ErrorFocusEntry } from '../core/adapt'
@@ -54,13 +57,25 @@ import {
   type LessonContentOutput
 } from '../core/schemas'
 import { generateStructured } from './ai'
-import { getDb, getDefaultProfile, schema } from './db'
+import { getDb, schema } from './db'
 import { emitStudentEvent } from './events'
 import { runtimeText } from '../core/runtime-text'
 import { errorHints, focusFor, recordCorrections } from './notebook'
-import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors } from './review'
+import { cardsForLesson, cardsForPhrases, cardsForRecurringErrors, dueCount } from './review'
 import { ownerOfLesson, openTrackLessons, trackContextOf, type LessonOwner } from './tracks'
-import { applyReestimation } from './tutor'
+import { applyReestimation, cancelTurnsExceptProfile } from './tutor'
+import { exerciseForProfile, lessonIdsForProfile } from './scope'
+import {
+  PROFILE_COLORS,
+  activeProfileId,
+  createProfile,
+  deleteProfile,
+  listProfiles,
+  profileViewOf as profileView,
+  resolveProfileId,
+  setActiveProfile,
+  updateProfile
+} from './profiles'
 import { getSettings } from './settings'
 
 type ProfileRow = typeof schema.profiles.$inferSelect
@@ -128,17 +143,23 @@ function toCefr(value: string | null | undefined): CefrLevel {
   return clampLevel(value)
 }
 
-export function profileView(profile: ProfileRow): ProfileView {
+function profileState(profileId = activeProfileId()): ProfileState {
+  const profile = requireProfileRow(profileId)
   return {
-    id: profile.id,
-    targetLang: profile.targetLang,
-    nativeLang: profile.nativeLang,
-    goal: profile.goal,
-    cefr: profile.cefr ? toCefr(profile.cefr) : null,
-    focusMix: profile.focusMix,
-    placementScore: profile.placementScore,
-    onboardingComplete: profile.onboardingCompletedAt != null
+    profile: profileView(profile),
+    skills: skillsOf(profile.id),
+    curriculumReady: unitCount(profile.id) > 0
   }
+}
+
+/**
+ * V2: a linha do perfil é sempre lida por id — sem fallback silencioso para
+ * "o primeiro perfil". Perfil inexistente é erro, não outro aluno.
+ */
+function requireProfileRow(profileId: number): ProfileRow {
+  const row = getDb().select().from(schema.profiles).where(eq(schema.profiles.id, profileId)).get()
+  if (!row) throw new Error('Perfil não encontrado.')
+  return row
 }
 
 function readPrefs(profile: ProfileRow): ProfilePrefs {
@@ -173,15 +194,6 @@ function skillsOf(profileId: number): ProfileState['skills'] {
       estimate: row.estimate,
       confidence: row.confidence
     }))
-}
-
-function profileState(): ProfileState {
-  const profile = getDefaultProfile()
-  return {
-    profile: profileView(profile),
-    skills: skillsOf(profile.id),
-    curriculumReady: unitCount(profile.id) > 0
-  }
 }
 
 function setSkill(profileId: number, skill: SkillId, estimate: number, confidence: number): void {
@@ -259,9 +271,9 @@ function summaryOf(lesson: LessonRow, progress: ProgressRow | undefined, owner?:
   }
 }
 
-export function curriculumView(): CurriculumView {
+export function curriculumView(profileId = activeProfileId()): CurriculumView {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
 
   const units = db
     .select()
@@ -317,16 +329,21 @@ export function curriculumView(): CurriculumView {
   return { units: views, generated: true }
 }
 
-let curriculumJob: Promise<CurriculumView> | null = null
+/**
+ * V2: um job por perfil. A versão antiga tinha `curriculumJob` único, e com dois
+ * perfis o segundo pedindo currículo recebia o currículo do primeiro.
+ */
+const curriculumJobs = new Map<number, Promise<CurriculumView>>()
 
-export function generateCurriculum(): Promise<CurriculumView> {
-  if (curriculumJob) return curriculumJob
+export function generateCurriculum(profileId = activeProfileId()): Promise<CurriculumView> {
+  const pending = curriculumJobs.get(profileId)
+  if (pending) return pending
 
-  curriculumJob = (async () => {
+  const job = (async () => {
     const db = getDb()
-    const profile = getDefaultProfile()
+    const profile = requireProfileRow(profileId)
 
-    if (unitCount(profile.id) > 0) return curriculumView()
+    if (unitCount(profile.id) > 0) return curriculumView(profile.id)
 
     const level = toCefr(profile.cefr)
     const locale = promptLocale(profile.targetLang, profile.nativeLang)
@@ -378,6 +395,8 @@ export function generateCurriculum(): Promise<CurriculumView> {
           tx.insert(schema.lessons)
             .values({
               unitId: insertedUnit.id,
+              // V2: dono explícito na nascença da linha — nada de posse só por join.
+              profileId: profile.id,
               title: lesson.title,
               objective: lesson.objective,
               level: clampLevel(unit.level),
@@ -389,12 +408,13 @@ export function generateCurriculum(): Promise<CurriculumView> {
       }
     })
 
-    return curriculumView()
+    return curriculumView(profile.id)
   })().finally(() => {
-    curriculumJob = null
+    curriculumJobs.delete(profileId)
   })
 
-  return curriculumJob
+  curriculumJobs.set(profileId, job)
+  return job
 }
 
 function getOwnedLesson(
@@ -903,12 +923,12 @@ function closeOrphanLessonSessions(profileId: number, lessonId: number): void {
  * cache sem contaminar o painel de Progresso. Idempotente: lição completa sai
  * imediatamente.
  */
-export async function prewarmLesson(lessonId: number): Promise<{
+export async function prewarmLesson(lessonId: number, profileId = activeProfileId()): Promise<{
   content: boolean
   exercises: number
   source: 'ai' | 'fallback' | null
 }> {
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
   const owned = getOwnedLesson(lessonId, profile.id)
   if (!owned) throw new Error('Lição não encontrada.')
 
@@ -930,9 +950,9 @@ export async function prewarmLesson(lessonId: number): Promise<{
   }
 }
 
-export async function openLesson(lessonId: number): Promise<LessonDetail> {
+export async function openLesson(lessonId: number, profileId = activeProfileId()): Promise<LessonDetail> {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
   const owned = getOwnedLesson(lessonId, profile.id)
 
   if (!owned) throw new Error('Lição não encontrada.')
@@ -1014,30 +1034,29 @@ export async function openLesson(lessonId: number): Promise<LessonDetail> {
  * exercícios só substituem os antigos depois de gerados e validados: sem IA,
  * a lição mantém o que já tinha em vez de cair para o gerador local.
  */
-export async function regenerateLessonExercises(lessonId: number): Promise<LessonDetail> {
-  const profile = getDefaultProfile()
+export async function regenerateLessonExercises(
+  lessonId: number,
+  profileId = activeProfileId()
+): Promise<LessonDetail> {
+  const profile = requireProfileRow(profileId)
   const owned = getOwnedLesson(lessonId, profile.id)
 
   if (!owned) throw new Error('Lição não encontrada.')
 
   await ensureLessonGeneratedOnce(owned.lesson, profile, owned.owner, { forceExercises: true })
-  return openLesson(lessonId)
+  return openLesson(lessonId, profile.id)
 }
 
-export async function answerExercise(input: {
-  exerciseId: number
-  response: string
-  latencyMs?: number
-}): Promise<GradeFeedback> {
+export async function answerExercise(
+  input: { exerciseId: number; response: string; latencyMs?: number },
+  profileId = activeProfileId()
+): Promise<GradeFeedback> {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
 
-  const exercise = db
-    .select()
-    .from(schema.exercises)
-    .where(eq(schema.exercises.id, input.exerciseId))
-    .get()
-
+  // V2 (D2): o exercício só existe para quem o responde — a posse da lição é
+  // resolvida numa consulta só, e exercício órfão (lição apagada) não responde.
+  const exercise = exerciseForProfile(input.exerciseId, profile.id)
   if (!exercise) throw new Error('Exercício não encontrado.')
   if (exercise.blocked) {
     throw new Error(runtimeText(profile.nativeLang, 'error.exerciseRemoved'))
@@ -1049,11 +1068,7 @@ export async function answerExercise(input: {
     .where(eq(schema.lessons.id, exercise.lessonId))
     .get()
 
-  // M6 (D2): o exercício só responde se a lição dele pertencer ao perfil atual
-  // — id de outro perfil é "não encontrado", não uma porta para dados alheios.
-  if (lesson && !getOwnedLesson(lesson.id, profile.id)) {
-    throw new Error('Exercício não encontrado.')
-  }
+  if (!lesson) throw new Error('Exercício não encontrado.')
 
   const payload = exercisePayload(exercise)
   const answerKey = parseAnswerKey(exercise)
@@ -1126,9 +1141,15 @@ export async function answerExercise(input: {
   return feedback
 }
 
-export function finishLesson(input: { lessonId: number; sessionId: number }): LessonResultView {
+export function finishLesson(
+  input: { lessonId: number; sessionId: number },
+  profileId = activeProfileId()
+): LessonResultView {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
+  // V2 (D2): fechar lição de outro perfil é "não encontrada", não fechar a lição
+  // alheia e marcar o progresso dele.
+  if (!getOwnedLesson(input.lessonId, profile.id)) throw new Error('Lição não encontrada.')
 
   const exerciseRows = db
     .select({ id: schema.exercises.id })
@@ -1205,10 +1226,17 @@ export function finishLesson(input: { lessonId: number; sessionId: number }): Le
       endedAt: Date.now(),
       summary: JSON.stringify({ lessonId: input.lessonId, correct, total, score, cardsCreated })
     })
-    .where(eq(schema.studySessions.id, input.sessionId))
+    // V2: fechar sessão por id sem escopo encerrava a sessão de outro perfil.
+    .where(
+      and(
+        eq(schema.studySessions.id, input.sessionId),
+        eq(schema.studySessions.profileId, profile.id),
+        isNull(schema.studySessions.endedAt)
+      )
+    )
     .run()
 
-  emitStudentEvent('lesson-finished', String(input.lessonId))
+  emitStudentEvent('lesson-finished', String(input.lessonId), profile.id)
 
   return { lessonId: input.lessonId, score, correct, total, cardsCreated, levelChange }
 }
@@ -1248,7 +1276,8 @@ export function lastOpenedLesson(profileId: number): LessonSummary | null {
 
 /** Lições ainda não concluídas das duas camadas, para a recomendação da home. */
 export function pendingLessons(profileId: number): { base: LessonSummary[]; focus: LessonSummary[] } {
-  const base = curriculumView()
+  // V2: usa o perfil pedido (antes ignorava o próprio argumento e lia o padrão).
+  const base = curriculumView(profileId)
     .units.flatMap((unit) => unit.lessons)
     .filter((lesson) => lesson.status !== 'completed')
 
@@ -1257,12 +1286,11 @@ export function pendingLessons(profileId: number): { base: LessonSummary[]; focu
   return { base, focus }
 }
 
-export async function generatePlacement(input: {
-  goal?: string
-  targetLang?: string
-  nativeLang?: string
-} = {}): Promise<PlacementTest> {
-  const profile = getDefaultProfile()
+export async function generatePlacement(
+  input: { goal?: string; targetLang?: string; nativeLang?: string } = {},
+  profileId = activeProfileId()
+): Promise<PlacementTest> {
+  const profile = requireProfileRow(profileId)
   // Durante o onboarding o idioma já foi escolhido mas ainda não foi salvo no
   // perfil — o teste de nivelamento nasce no idioma-alvo certo na hora.
   const locale = promptLocale(
@@ -1300,9 +1328,9 @@ export async function generatePlacement(input: {
   }
 }
 
-export function submitPlacement(answers: number[]): PlacementResult {
+export function submitPlacement(answers: number[], profileId = activeProfileId()): PlacementResult {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
   const stored = readPrefs(profile).placement
 
   if (!stored || stored.questions.length === 0) {
@@ -1352,9 +1380,9 @@ function normalizeLangCode(value: string | null | undefined): string | null {
   return region ? `${base.toLowerCase()}-${region.toUpperCase()}` : base.toLowerCase()
 }
 
-export function completeOnboarding(input: OnboardingInput): ProfileState {
+export function completeOnboarding(input: OnboardingInput, profileId = activeProfileId()): ProfileState {
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = requireProfileRow(profileId)
 
   if (!CEFR_LEVELS.includes(input.cefr)) {
     throw new Error('Nível inválido.')
@@ -1371,7 +1399,7 @@ export function completeOnboarding(input: OnboardingInput): ProfileState {
 
   if (alreadyDone && (targetLang !== profile.targetLang || nativeLang !== profile.nativeLang)) {
     throw new Error(
-      'O idioma ensinado só pode ser escolhido no primeiro onboarding: o currículo salvo pertence ao idioma anterior.'
+      'O idioma ensinado só pode ser escolhido no primeiro onboarding: o currículo salvo pertence ao idioma anterior. Crie outro perfil para mudar de idioma.'
     )
   }
 
@@ -1381,6 +1409,8 @@ export function completeOnboarding(input: OnboardingInput): ProfileState {
       cefr: input.cefr,
       targetLang,
       nativeLang,
+      name: input.name?.trim() || profile.name,
+      color: input.color?.trim() || profile.color,
       focusMix: getSettings().focusMix,
       onboardingCompletedAt: profile.onboardingCompletedAt ?? Date.now()
     })
@@ -1398,44 +1428,190 @@ export function completeOnboarding(input: OnboardingInput): ProfileState {
     if (!existing) setSkill(profile.id, skill, sample, 0.35)
   }
 
-  return profileState()
+  return profileState(profile.id)
 }
 
 /**
- * "Primeiro acesso": apaga toda a memória de aprendizado — caderno de erros,
- * cards e revisões, tentativas, progresso, sessões, conversas, trilhas e
- * currículo — e remove o perfil. O próximo `getDefaultProfile()` recria o
- * perfil padrão, o onboarding recomeça e dá para escolher outro idioma.
- * Configurações de IA e chaves não são tocadas: são preferência do app, não
- * memória do aluno.
+ * "Primeiro acesso" **deste perfil**: apaga a memória de aprendizado dele —
+ * caderno de erros, cards e revisões, tentativas, progresso, sessões, conversas,
+ * trilhas e currículo — e devolve o perfil ao estado pré-onboarding, mantendo
+ * nome e cor. V2: os outros perfis não são tocados (antes era um DELETE global).
+ * Configurações de IA e chaves continuam fora: são preferência do app.
  */
-export function resetMemory(): ProfileState {
-  getDb().transaction((tx) => {
-    tx.delete(schema.reviews).run()
-    tx.delete(schema.cards).run()
-    tx.delete(schema.errors).run()
-    tx.delete(schema.attempts).run()
-    tx.delete(schema.scenarioRuns).run()
-    tx.delete(schema.contentReports).run()
-    tx.delete(schema.messages).run()
-    tx.delete(schema.conversations).run()
-    tx.delete(schema.studySessions).run()
-    tx.delete(schema.lessonProgress).run()
-    tx.delete(schema.trackLessons).run()
-    tx.delete(schema.exercises).run()
-    tx.delete(schema.lessonItems).run()
-    tx.delete(schema.lessons).run()
-    tx.delete(schema.units).run()
-    tx.delete(schema.focusTracks).run()
-    tx.delete(schema.skillsState).run()
-    tx.delete(schema.profiles).run()
+export function resetMemory(profileId = activeProfileId()): ProfileState {
+  const db = getDb()
+  const profile = requireProfileRow(profileId)
+
+  db.transaction((tx) => {
+    // FK com cascade: reviews (cards), messages (conversas), lesson_items (lições),
+    // attempts (exercícios). O que não tem cascade sai na lista abaixo.
+    const lessonIds = lessonIdsForProfile(profile.id)
+    const trackIds = tx
+      .select({ id: schema.focusTracks.id })
+      .from(schema.focusTracks)
+      .where(eq(schema.focusTracks.profileId, profile.id))
+      .all()
+      .map((row) => row.id)
+    const conversationIds = tx
+      .select({ id: schema.conversations.id })
+      .from(schema.conversations)
+      .where(eq(schema.conversations.profileId, profile.id))
+      .all()
+      .map((row) => row.id)
+
+    tx.delete(schema.reviews)
+      .where(sql`${schema.reviews.cardId} in (select ${schema.cards.id} from ${schema.cards} where ${schema.cards.profileId} = ${profile.id})`)
+      .run()
+    tx.delete(schema.cards).where(eq(schema.cards.profileId, profile.id)).run()
+    tx.delete(schema.errors).where(eq(schema.errors.profileId, profile.id)).run()
+
+    if (lessonIds.length > 0) {
+      tx.delete(schema.attempts)
+        .where(
+          sql`${schema.attempts.exerciseId} in (select ${schema.exercises.id} from ${schema.exercises} where ${schema.exercises.lessonId} in (${sql.join(lessonIds.map((id) => sql`${id}`), sql`, `)}))`
+        )
+        .run()
+      tx.delete(schema.exercises).where(inArray(schema.exercises.lessonId, lessonIds)).run()
+      tx.delete(schema.speechRuns).where(inArray(schema.speechRuns.lessonId, lessonIds)).run()
+      tx.delete(schema.lessons).where(inArray(schema.lessons.id, lessonIds)).run()
+    }
+    tx.delete(schema.lessons).where(eq(schema.lessons.profileId, profile.id)).run()
+
+    tx.delete(schema.speechRuns).where(eq(schema.speechRuns.profileId, profile.id)).run()
+    tx.delete(schema.audioCache).where(eq(schema.audioCache.profileId, profile.id)).run()
+
+    if (conversationIds.length > 0) {
+      tx.delete(schema.scenarioRuns).where(inArray(schema.scenarioRuns.conversationId, conversationIds)).run()
+      tx.delete(schema.conversations).where(inArray(schema.conversations.id, conversationIds)).run()
+    }
+    tx.delete(schema.scenarioRuns)
+      .where(sql`${schema.scenarioRuns.conversationId} in (select ${schema.conversations.id} from ${schema.conversations} where ${schema.conversations.profileId} = ${profile.id})`)
+      .run()
+
+    if (trackIds.length > 0) tx.delete(schema.trackLessons).where(inArray(schema.trackLessons.trackId, trackIds)).run()
+
+    tx.delete(schema.lessonProgress).where(eq(schema.lessonProgress.profileId, profile.id)).run()
+    tx.delete(schema.studySessions).where(eq(schema.studySessions.profileId, profile.id)).run()
+    tx.delete(schema.contentReports).where(eq(schema.contentReports.profileId, profile.id)).run()
+    tx.delete(schema.focusTracks).where(eq(schema.focusTracks.profileId, profile.id)).run()
+    tx.delete(schema.units).where(eq(schema.units.profileId, profile.id)).run()
+    tx.delete(schema.skillsState).where(eq(schema.skillsState.profileId, profile.id)).run()
+
+    // Currículo e memoriais do perfil voltam ao zero, incluindo nivelamento salvo.
+    tx.update(schema.profiles)
+      .set({
+        onboardingCompletedAt: null,
+        placementScore: null,
+        cefr: null,
+        goal: null,
+        prefs: null
+      })
+      .where(eq(schema.profiles.id, profile.id))
+      .run()
   })
 
-  return profileState()
+  emitStudentEvent('memory-reset', String(profile.id), profile.id)
+  return profileState(profile.id)
+}
+
+/**
+ * V2: a lista de perfis com o peso da memória de cada um — a tela de perfis e o
+ * seletor da sidebar leem isto, nunca o banco. Cada contagem é escopada.
+ */
+export function profilesView(activeId = activeProfileId()): ProfilesView {
+  const db = getDb()
+  const rows = listProfiles()
+
+  const profiles: ProfileSummary[] = rows.map((row) => {
+    const completedLessons = db
+      .select({ value: count() })
+      .from(schema.lessonProgress)
+      .where(and(eq(schema.lessonProgress.profileId, row.id), eq(schema.lessonProgress.status, 'completed')))
+      .get()?.value ?? 0
+
+    const dueCards = dueCount(row.id)
+
+    const openErrors = db
+      .select({ value: count() })
+      .from(schema.errors)
+      .where(and(eq(schema.errors.profileId, row.id), isNull(schema.errors.resolvedAt)))
+      .get()?.value ?? 0
+
+    const activeTracks = db
+      .select({ value: count() })
+      .from(schema.focusTracks)
+      .where(and(eq(schema.focusTracks.profileId, row.id), eq(schema.focusTracks.status, 'active')))
+      .get()?.value ?? 0
+
+    return {
+      ...profileView(row),
+      completedLessons: Number(completedLessons),
+      dueCards,
+      openErrors: Number(openErrors),
+      activeTracks: Number(activeTracks),
+      active: row.id === activeId
+    }
+  })
+
+  return {
+    profiles,
+    activeProfileId: activeId,
+    colors: [...PROFILE_COLORS],
+    multiProfile: profiles.length > 1
+  }
 }
 
 export function registerLearningIpc(): void {
   handle('profile:get', () => profileState())
+
+  // --- V2: múltiplos perfis --------------------------------------------------
+  handle('profile:list', (): ProfilesView => profilesView())
+
+  handle('profile:switch', (_event, profileId: number) => {
+    const row = setActiveProfile(profileId)
+    // V2: stream de outro perfil não continua rodando atrás da troca.
+    cancelTurnsExceptProfile(row.id)
+    return profilesView(row.id)
+  })
+
+  handle('profile:create', (_event, input: CreateProfileInput = {}) => {
+    const row = createProfile({
+      name: input.name ?? null,
+      color: input.color ?? null,
+      targetLang: input.targetLang,
+      nativeLang: input.nativeLang
+    })
+    if (input.goal?.trim() || input.cefr) {
+      completeOnboarding(
+        {
+          goal: input.goal?.trim() || 'conversação geral',
+          cefr: input.cefr ?? 'A2',
+          targetLang: input.targetLang,
+          nativeLang: input.nativeLang,
+          name: input.name,
+          color: input.color
+        },
+        row.id
+      )
+    }
+    return profileState(row.id)
+  })
+
+  handle('profile:update', (_event, input: UpdateProfileInput & { profileId?: number }) =>
+    profileView(
+      updateProfile(resolveProfileId(input.profileId), {
+        name: input.name,
+        color: input.color,
+        goal: input.goal,
+        focusMix: input.focusMix
+      })
+    )
+  )
+
+  handle('profile:delete', (_event, input: { profileId: number; acknowledged: boolean }) => {
+    if (!input.acknowledged) throw new Error('A exclusão de um perfil precisa ser confirmada.')
+    return deleteProfile(input.profileId)
+  })
 
   handle('profile:onboard', (_event, input: OnboardingInput) => completeOnboarding(input))
 

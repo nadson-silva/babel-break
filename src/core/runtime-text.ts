@@ -81,11 +81,27 @@ export type RuntimeTextKey =
   | 'grade.translateCorrect'
   // erros de geração — o app explica a degradação no idioma do aluno
   | 'error.noModel'
+  | 'error.noModelStream'
+  | 'error.emptyReply'
+  | 'chat.emptyMessage'
+  | 'conversation.notFound'
   | 'error.aiUnavailableCurriculum'
   | 'error.aiUnavailableContent'
   | 'error.aiUnavailableExercises'
   | 'error.aiKeptExercises'
   | 'error.exerciseRemoved'
+  | 'error.aiUnavailableScenario'
+  | 'error.aiUnavailableTrack'
+  // voz (v2)
+  | 'voice.noTts'
+  | 'voice.noAsr'
+  | 'voice.micDenied'
+  | 'voice.empty'
+  | 'voice.scorePrefix'
+  | 'voice.listenPrompt'
+  | 'voice.speakPrompt'
+  | 'speech.kind.speak'
+  | 'speech.kind.listen'
 
 type Templates = Record<RuntimeTextKey, string>
 
@@ -123,6 +139,12 @@ const PT_BR: Templates = {
   'grade.translateCorrect': 'Correto! Tradução natural.',
   'error.noModel':
     'Nenhum modelo configurado. Abra Configurações, escolha um provedor e um modelo antes de gerar conteúdo.',
+  'error.noModelStream':
+    'Nenhum modelo selecionado. Escolha um modelo em Configurações antes de conversar.',
+  'error.emptyReply':
+    'O modelo não retornou texto. Se ele usa raciocínio interno (thinking), escolha outro modelo em Configurações.',
+  'chat.emptyMessage': 'Escreva no idioma que você está estudando antes de enviar.',
+  'conversation.notFound': 'Conversa não encontrada.',
   'error.aiUnavailableCurriculum':
     'A IA está indisponível e o plano de currículo offline só cobre inglês. Para montar um currículo de {target}, configure um provedor em Configurações.',
   'error.aiUnavailableContent':
@@ -133,6 +155,23 @@ const PT_BR: Templates = {
     'A IA está indisponível, então os exercícios atuais foram mantidos. Tente de novo quando o provedor voltar.',
   'error.exerciseRemoved':
     'Este exercício saiu da prática porque você reportou conteúdo ruim. Abra a lição de novo para receber exercícios novos.',
+  'error.aiUnavailableScenario':
+    'Sem IA disponível: o cenário determinístico offline só cobre inglês. Configure um provedor em Configurações.',
+  'error.aiUnavailableTrack':
+    'A IA está indisponível e o banco de trilhas offline só cobre inglês. Para montar uma trilha de {target}, configure um provedor em Configurações.',
+  'voice.noTts':
+    'Sem voz sintetizada: configure um provedor com síntese de fala (Gemini TTS) ou ligar a voz do sistema em Configurações.',
+  'voice.noAsr':
+    'Sem transcrição de fala: o provedor atual não aceita áudio. Configure o Gemini em Configurações para treinar pronúncia.',
+  'voice.micDenied':
+    'O microfone foi negado. Autorize o acesso nas permissões do sistema para gravar.',
+  'voice.empty':
+    'Não deu para ouvir nada. Fale a frase inteira, sem pressa, e tente de novo.',
+  'voice.scorePrefix': 'Pronúncia: {score}% das palavras no lugar.',
+  'voice.listenPrompt': 'Ouça e escolha o que você ouviu.',
+  'voice.speakPrompt': 'Ouça a frase e repita em voz alta.',
+  'speech.kind.speak': 'fala',
+  'speech.kind.listen': 'escuta',
   'fb.mcTranslation.instruction': 'Escolha a tradução correta.',
   'fb.mcTranslation.prompt': 'O que significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -197,6 +236,11 @@ const EN: Templates = {
   'grade.translateCorrect': 'Correct! Natural translation.',
   'error.noModel':
     'No model configured. Open Settings, pick a provider and a model before generating content.',
+  'error.noModelStream': 'No model selected. Pick a model in Settings before chatting.',
+  'error.emptyReply':
+    'The model returned no text. If it uses internal reasoning (thinking), pick another model in Settings.',
+  'chat.emptyMessage': 'Write in the language you are studying before sending.',
+  'conversation.notFound': 'Conversation not found.',
   'error.aiUnavailableCurriculum':
     'AI is unavailable and the offline curriculum plan only covers English. To build a {target} curriculum, configure a provider in Settings.',
   'error.aiUnavailableContent':
@@ -207,6 +251,23 @@ const EN: Templates = {
     'AI is unavailable, so the current exercises were kept. Try again once the provider is back.',
   'error.exerciseRemoved':
     'This exercise left the practice because you reported bad content. Reopen the lesson to get new exercises.',
+  'error.aiUnavailableScenario':
+    'No AI available: the offline scenario bank only covers English. Configure a provider in Settings.',
+  'error.aiUnavailableTrack':
+    'AI is unavailable and the offline track bank only covers English. To build a {target} track, configure a provider in Settings.',
+  'voice.noTts':
+    'No speech synthesis: use a provider with TTS (Gemini TTS) or turn on system voices in Settings.',
+  'voice.noAsr':
+    'No speech recognition: the current provider does not take audio. Configure Gemini in Settings to practice pronunciation.',
+  'voice.micDenied':
+    'The microphone was denied. Allow access in your system permissions to record.',
+  'voice.empty':
+    'Nothing could be heard. Say the whole sentence, unhurried, and try again.',
+  'voice.scorePrefix': 'Pronunciation: {score}% of the words in place.',
+  'voice.listenPrompt': 'Listen and choose what you heard.',
+  'voice.speakPrompt': 'Listen to the sentence and repeat it out loud.',
+  'speech.kind.speak': 'speaking',
+  'speech.kind.listen': 'listening',
   'fb.mcTranslation.instruction': 'Choose the correct translation.',
   'fb.mcTranslation.prompt': 'What does “{term}” mean?',
   'fb.mcTranslation.explanation': '“{term}” means “{translation}”.',
@@ -271,6 +332,11 @@ const ES: Templates = {
   'grade.translateCorrect': '¡Correcto! Traducción natural.',
   'error.noModel':
     'No hay modelo configurado. Abre Configuración, elige un proveedor y un modelo antes de generar contenido.',
+  'error.noModelStream': 'No hay modelo seleccionado. Elige un modelo en Configuración antes de chatear.',
+  'error.emptyReply':
+    'El modelo no devolvió texto. Si usa razonamiento interno (thinking), elige otro modelo en Configuración.',
+  'chat.emptyMessage': 'Escribe en el idioma que estudias antes de enviar.',
+  'conversation.notFound': 'Conversación no encontrada.',
   'error.aiUnavailableCurriculum':
     'La IA no está disponible y el plan de currículo sin conexión solo cubre inglés. Para crear un currículo de {target}, configura un proveedor en Configuración.',
   'error.aiUnavailableContent':
@@ -281,6 +347,23 @@ const ES: Templates = {
     'La IA no está disponible, así que se mantuvieron los ejercicios actuales. Inténtalo de nuevo cuando el proveedor vuelva.',
   'error.exerciseRemoved':
     'Este ejercicio salió de la práctica porque reportaste contenido malo. Abre de nuevo la lección para recibir ejercicios nuevos.',
+  'error.aiUnavailableScenario':
+    'Sin IA: el banco de escenarios sin conexión solo cubre inglés. Configura un proveedor en Configuración.',
+  'error.aiUnavailableTrack':
+    'La IA no está disponible y el banco de itinerarios sin conexión solo cubre inglés. Para crear una ruta de {target}, configura un proveedor en Configuración.',
+  'voice.noTts':
+    'Sin síntesis de voz: usa un proveedor con TTS (Gemini TTS) o activa la voz del sistema en Configuración.',
+  'voice.noAsr':
+    'Sin reconocimiento de voz: el proveedor actual no acepta audio. Configura Gemini en Configuración para practicar pronunciación.',
+  'voice.micDenied':
+    'El micrófono fue denegado. Permite el acceso en los permisos del sistema para grabar.',
+  'voice.empty':
+    'No se pudo oír nada. Di la frase completa, sin prisa, e inténtalo de nuevo.',
+  'voice.scorePrefix': 'Pronunciación: {score}% de las palabras en su lugar.',
+  'voice.listenPrompt': 'Escucha y elige lo que oíste.',
+  'voice.speakPrompt': 'Escucha la frase y repítela en voz alta.',
+  'speech.kind.speak': 'habla',
+  'speech.kind.listen': 'escucha',
   'fb.mcTranslation.instruction': 'Elige la traducción correcta.',
   'fb.mcTranslation.prompt': '¿Qué significa “{term}”?',
   'fb.mcTranslation.explanation': '“{term}” significa “{translation}”.',
@@ -345,6 +428,11 @@ const FR: Templates = {
   'grade.translateCorrect': 'Correct ! Traduction naturelle.',
   'error.noModel':
     'Aucun modèle configuré. Ouvrez les Paramètres et choisissez un fournisseur et un modèle avant de générer du contenu.',
+  'error.noModelStream': 'Aucun modèle sélectionné. Choisissez un modèle dans les Paramètres avant de discuter.',
+  'error.emptyReply':
+    "Le modèle n'a renvoyé aucun texte. S'il utilise un raisonnement interne (thinking), choisissez un autre modèle dans les Paramètres.",
+  'chat.emptyMessage': "Écrivez dans la langue étudiée avant d'envoyer.",
+  'conversation.notFound': 'Conversation introuvable.',
   'error.aiUnavailableCurriculum':
     "L'IA est indisponible et le plan de programme hors ligne ne couvre que l'anglais. Pour construire un programme en {target}, configurez un fournisseur dans les Paramètres.",
   'error.aiUnavailableContent':
@@ -355,6 +443,23 @@ const FR: Templates = {
     "L'IA est indisponible, les exercices actuels ont donc été conservés. Réessayez quand le fournisseur sera de retour.",
   'error.exerciseRemoved':
     'Cet exercice a quitté la pratique parce que vous avez signalé un contenu de mauvaise qualité. Rouvrez la leçon pour recevoir de nouveaux exercices.',
+  'error.aiUnavailableScenario':
+    "Sans IA, la banque de scénarios hors ligne ne couvre que l'anglais. Configurez un fournisseur dans les Paramètres.",
+  'error.aiUnavailableTrack':
+    "L'IA est indisponible et la banque de parcours hors ligne ne couvre que l'anglais. Pour créer un parcours en {target}, configurez un fournisseur dans les Paramètres.",
+  'voice.noTts':
+    'Pas de synthèse vocale : utilisez un fournisseur TTS (Gemini TTS) ou activez la voix du système dans les Paramètres.',
+  'voice.noAsr':
+    "Pas de reconnaissance vocale : le fournisseur actuel n'accepte pas l'audio. Configurez Gemini dans les Paramètres pour travailler la prononciation.",
+  'voice.micDenied':
+    'Le microphone a été refusé. Autorisez l’accès dans les permissions du système pour enregistrer.',
+  'voice.empty':
+    "Rien n'a pu être entendu. Dites la phrase entière, sans hâte, et réessayez.",
+  'voice.scorePrefix': 'Prononciation : {score}% des mots à leur place.',
+  'voice.listenPrompt': 'Écoutez et choisissez ce que vous avez entendu.',
+  'voice.speakPrompt': 'Écoutez la phrase et répétez-la à voix haute.',
+  'speech.kind.speak': 'parole',
+  'speech.kind.listen': 'écoute',
   'fb.mcTranslation.instruction': 'Choisissez la traduction correcte.',
   'fb.mcTranslation.prompt': 'Que signifie « {term} » ?',
   'fb.mcTranslation.explanation': '« {term} » signifie « {translation} ».',

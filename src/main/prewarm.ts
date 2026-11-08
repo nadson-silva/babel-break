@@ -24,7 +24,8 @@ import { handle } from './ipc-contract'
 import { and, eq, sql } from 'drizzle-orm'
 import type { CacheStats, PrewarmCycleOutcome, PrewarmOutcome, PrewarmState } from '../shared/types'
 import { aiInFlight } from './ai'
-import { getDb, getDefaultProfile, schema } from './db'
+import { getDb, schema } from './db'
+import { activeProfileId } from './profiles'
 import { onStudentEvent, type StudentEvent } from './events'
 import { prewarmLesson, pendingLessons } from './learning'
 import { ensureLessonScenario } from './scenario'
@@ -85,9 +86,14 @@ export function dbSizeBytes(): number {
   }
 }
 
-/** O que já está salvo e, portanto, abre sem IA e sem token. */
-export function cacheStats(): CacheStats {
+/**
+ * O que já está salvo e, portanto, abre sem IA e sem token.
+ * V2: escopado por perfil — com dois alunos no mesmo aparelho, "3 lições em
+ * cache" do perfil de inglês não pode aparecer no painel de quem estuda japonês.
+ */
+export function cacheStats(profileId = activeProfileId()): CacheStats {
   const db = getDb()
+  const owned = sql`coalesce(${schema.lessons.profileId}, ${schema.units.profileId}, ${schema.focusTracks.profileId}) = ${profileId}`
 
   const lessonCounts = db
     .select({
@@ -97,6 +103,9 @@ export function cacheStats(): CacheStats {
       scenarios: sql<number>`sum(case when ${schema.lessons.scenario} is not null then 1 else 0 end)`
     })
     .from(schema.lessons)
+    .leftJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.focusTracks, eq(schema.focusTracks.id, schema.lessons.trackId))
+    .where(owned)
     .get()
 
   const exerciseCounts = db
@@ -105,6 +114,10 @@ export function cacheStats(): CacheStats {
       hidden: sql<number>`sum(case when ${schema.exercises.blocked} = 1 then 1 else 0 end)`
     })
     .from(schema.exercises)
+    .innerJoin(schema.lessons, eq(schema.lessons.id, schema.exercises.lessonId))
+    .leftJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.focusTracks, eq(schema.focusTracks.id, schema.lessons.trackId))
+    .where(owned)
     .get()
 
   return {
@@ -118,9 +131,9 @@ export function cacheStats(): CacheStats {
   }
 }
 
-export function prewarmState(): PrewarmState {
+export function prewarmState(profileId = activeProfileId()): PrewarmState {
   return {
-    ...cacheStats(),
+    ...cacheStats(profileId),
     enabled: getSettings().pregenerate,
     running,
     lastOutcome: readStoredOutcome(),
@@ -142,10 +155,9 @@ interface Candidate {
  * Quem entra na fila: a próxima lição sugerida de cada camada, e no máximo uma
  * por camada por ciclo. Lição reportada como ruim (stale) volta para a fila.
  */
-export function pickCandidates(limit = JOBS_PER_CYCLE): Candidate[] {
+export function pickCandidates(limit = JOBS_PER_CYCLE, profileId = activeProfileId()): Candidate[] {
   const db = getDb()
-  const profile = getDefaultProfile()
-  const pending = pendingLessons(profile.id)
+  const pending = pendingLessons(profileId)
 
   const candidates: Candidate[] = []
 
@@ -199,7 +211,7 @@ export type CycleResult = PrewarmCycleOutcome
  * Um ciclo de aquecimento. Chamado pelo agendador ocioso e pelo botão
  * "aquecer agora" das Configurações — e diretamente nos testes de integração.
  */
-export async function runPrewarmCycle(): Promise<CycleResult> {
+export async function runPrewarmCycle(profileId = activeProfileId()): Promise<CycleResult> {
   const startedAt = Date.now()
   const empty: CycleResult = {
     at: startedAt,
@@ -227,7 +239,7 @@ export async function runPrewarmCycle(): Promise<CycleResult> {
     }
   }
 
-  const candidates = pickCandidates()
+  const candidates = pickCandidates(JOBS_PER_CYCLE, profileId)
   if (candidates.length === 0) {
     return { ...empty, detail: 'nada novo para aquecer' }
   }
@@ -252,7 +264,7 @@ export async function runPrewarmCycle(): Promise<CycleResult> {
 
       if (candidate.needsContent) {
         try {
-          const result = await prewarmLesson(candidate.lessonId)
+          const result = await prewarmLesson(candidate.lessonId, profileId)
           warmed.content += result.content ? 1 : 0
           warmed.exercises += result.exercises
           if (result.source === 'fallback') source = 'fallback'
@@ -265,7 +277,7 @@ export async function runPrewarmCycle(): Promise<CycleResult> {
 
       if (candidate.needsScenario) {
         try {
-          await ensureLessonScenario(candidate.lessonId)
+          await ensureLessonScenario(candidate.lessonId, profileId)
           warmed.scenarios += 1
         } catch (error) {
           detail = detail ?? (error instanceof Error ? error.message : String(error))
@@ -342,6 +354,8 @@ export function registerPrewarmIpc(): void {
   handle('pregen:run', () => runPrewarmCycle())
   handle('cache:stats', (): CacheStats => cacheStats())
 }
+
+/** V2: trocar de perfil reaquece a fila para o aluno que passou a estudar. */
 
 /** Só para teste: estado interno limpo entre casos. */
 export function resetPrewarmForTest(): void {

@@ -50,8 +50,34 @@ export const ptBR = {
     review: 'Revisão',
     notebook: 'Caderno de erros',
     progress: 'Progresso',
+    profiles: 'Perfis',
     settings: 'Configurações'
   },
+  profiles: {
+    title: 'Perfis',
+    subtitle: 'Cada perfil tem idioma, caderno de erros, revisão e progresso próprios.',
+    empty: 'Nenhum perfil ainda.',
+    active: 'Em uso',
+    notOnboarded: 'Falta o início',
+    manage: 'Gerenciar perfis',
+    newProfile: 'Novo perfil',
+    useProfile: 'Estudar com este perfil',
+    rename: 'Renomear',
+    delete: 'Apagar',
+    confirmDelete: 'Apagar de verdade',
+    deleteWarning:
+      'Isso apaga a memória deste aluno: lições, caderno de erros, cards de revisão, conversas e trilhas. Não tem como desfazer — exporte antes se quiser guardar.',
+    name: 'Nome do perfil',
+    color: 'Cor',
+    saveProfile: 'Salvar perfil',
+    pair: 'Ensina {target} · explica em {native}',
+    lessons: 'Lições feitas',
+    dueCards: 'Cards vencidos',
+    openErrors: 'Erros abertos',
+    tracks: 'Trilhas ativas',
+    help: 'Perfis diferentes podem ensinar idiomas diferentes no mesmo aparelho. As configurações de IA e a chave do Gemini são do app, não do perfil.'
+  },
+
   common: {
     save: 'Salvar alterações',
     saving: 'Salvando…',
@@ -65,6 +91,7 @@ export const ptBR = {
     openSettings: 'Abrir configurações',
     noModel: 'Nenhum modelo selecionado. Escolha um modelo em Configurações.',
     back: 'Voltar',
+    cancel: 'Cancelar',
     skip: 'Pular esta etapa',
     loading: 'Carregando…'
   },
@@ -207,6 +234,7 @@ export const ptBR = {
     of: 'de',
     next: 'Próxima',
     back: 'Voltar',
+    cancel: 'Cancelar',
     finishTest: 'Ver resultado',
     testResult: 'Seu nível estimado',
     testResultBody: 'Você acertou {correct} de {total}. Começaremos por aqui e ajustamos com o uso.',

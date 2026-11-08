@@ -13,11 +13,18 @@ export type StudentEvent =
   | 'scenario-finished'
   | 'track-approved'
   | 'settings-saved'
+  /** V2: memória de um perfil apagada (perfil continua vivo, só esquece). */
+  | 'memory-reset'
+  /** V2: o aluno trocou de perfil — jobs em espera e fila ociosa param no ato. */
+  | 'profile-switched'
+  | 'profile-deleted'
 
 export interface StudentEventPayload {
   event: StudentEvent
   at: number
   detail?: string
+  /** V2: dono do evento — com perfis múltiplos, o listener precisa saber de quem. */
+  profileId?: number
 }
 
 type Listener = (payload: StudentEventPayload) => void
@@ -29,8 +36,8 @@ export function onStudentEvent(listener: Listener): () => void {
   return () => listeners.delete(listener)
 }
 
-export function emitStudentEvent(event: StudentEvent, detail?: string): void {
-  const payload: StudentEventPayload = { event, at: Date.now(), detail }
+export function emitStudentEvent(event: StudentEvent, detail?: string, profileId?: number): void {
+  const payload: StudentEventPayload = { event, at: Date.now(), detail, profileId }
   for (const listener of [...listeners]) {
     try {
       listener(payload)

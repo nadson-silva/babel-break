@@ -24,17 +24,21 @@ import type {
   ScenarioView
 } from '../shared/types'
 import { clampLevel } from '../core/cefr'
-import { scenarioFeedbackPrompt, scenarioGenPrompt, promptLocale } from '../core/prompts'
+import { scenarioFeedbackPrompt, scenarioGenPrompt } from '../core/prompts'
 import { deterministicContentSupported, tokenize } from '../core/languages'
 import { scenarioFeedbackSchemaFor, scenarioSchema, type ScenarioOutput } from '../core/schemas'
 import { detectBucket, fallbackScenario, scenarioFeedbackFrom } from '../core/tracks'
 import { phraseCard } from '../core/srs'
 import { currentModel, generateStructured } from './ai'
 import { emitStudentEvent } from './events'
-import { getDb, getDefaultProfile, schema } from './db'
+import { getDb, schema } from './db'
+import { activeProfileId } from './profiles'
+import { localeFor, profileRow } from './locale'
+import { requireLessonForProfile } from './scope'
 import { errorHints } from './notebook'
 import { createCard } from './review'
 import { storedScenarioSeed, trackContextOf } from './tracks'
+import { runtimeText } from '../core/runtime-text'
 import { closeConversation, scenarioViewOf, toSummary } from './tutor'
 import { blendSkill } from './learning'
 
@@ -71,22 +75,31 @@ function toView(stored: StoredScenario): ScenarioView {
 }
 
 /** Fallback determinístico: banco de domínio escrito à mão, sem gastar token. Só cobre o idioma-fixture (inglês). */
-function localScenario(input: { title: string; objective: string; goalTag?: string; targetLang: string }): StoredScenario {
+function localScenario(input: {
+  title: string
+  objective: string
+  goalTag?: string
+  targetLang: string
+  nativeLang: string
+}): StoredScenario {
   if (!deterministicContentSupported(input.targetLang)) {
-    throw new Error(
-      'Sem IA disponível: o cenário determinístico offline só cobre inglês. Configure um provedor em Configurações.'
-    )
+    throw new Error(runtimeText(input.nativeLang, 'error.aiUnavailableScenario'))
   }
   const bucket = detectBucket(`${input.goalTag ?? ''} ${input.objective} ${input.title}`)
   return { ...fallbackScenario(bucket), source: 'fallback' }
 }
 
 /** Cenário da lição: cache em `lessons.scenario`, IA quando disponível. */
-export async function ensureLessonScenario(lessonId: number): Promise<ScenarioView> {
+export async function ensureLessonScenario(
+  lessonId: number,
+  profileId = activeProfileId()
+): Promise<ScenarioView> {
   const db = getDb()
 
-  const lesson = db.select().from(schema.lessons).where(eq(schema.lessons.id, lessonId)).get()
-  if (!lesson) throw new Error('Lição não encontrada.')
+  // V2 (D2): persona só se constrói para lição do perfil — id alheio é "não encontrada".
+  const lesson = requireLessonForProfile(lessonId, profileId)
+  const profile = profileRow(profileId)
+  if (!profile) throw new Error('Perfil não encontrado.')
 
   const cached = storedScenarioSeed(lesson.scenario)
   // O seed do banco local é placeholder: com modelo configurado ele é trocado
@@ -96,8 +109,7 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
     return toView(cached as StoredScenario)
   }
 
-  const profile = getDefaultProfile()
-  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const locale = localeFor(profile)
   const goalTag = lesson.trackId != null ? trackContextOf(lesson)?.goalTag : undefined
   const objective = lesson.objective ?? lesson.title
 
@@ -118,7 +130,13 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
     stored = { ...generated, source: 'ai', ...(goalTag ? { trackGoalTag: goalTag } : {}) }
   } catch (error) {
     console.warn('[scenario] geração por IA indisponível, usando o cenário local:', errorMessage(error))
-    stored = localScenario({ title: lesson.title, objective, goalTag, targetLang: profile.targetLang })
+    stored = localScenario({
+      title: lesson.title,
+      objective,
+      goalTag,
+      targetLang: profile.targetLang,
+      nativeLang: profile.nativeLang
+    })
   }
 
   db.update(schema.lessons).set({ scenario: JSON.stringify(stored) }).where(eq(schema.lessons.id, lessonId)).run()
@@ -127,12 +145,13 @@ export async function ensureLessonScenario(lessonId: number): Promise<ScenarioVi
 }
 
 /** Cenário avulso ("tenho entrevista amanhã"): tema livre, sem precisar de trilha. */
-export async function ensureTopicScenario(topic: string): Promise<ScenarioView> {
+export async function ensureTopicScenario(topic: string, profileId = activeProfileId()): Promise<ScenarioView> {
   const objective = topic.trim()
   if (!objective) throw new Error('Escolha um tema para o roleplay.')
 
-  const profile = getDefaultProfile()
-  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const profile = profileRow(profileId)
+  if (!profile) throw new Error('Perfil não encontrado.')
+  const locale = localeFor(profile)
 
   try {
     const prompt = scenarioGenPrompt({
@@ -150,7 +169,7 @@ export async function ensureTopicScenario(topic: string): Promise<ScenarioView> 
     return toView({ ...generated, source: 'ai' })
   } catch (error) {
     console.warn('[scenario] tema livre sem IA, usando cenário local:', errorMessage(error))
-    return toView(localScenario({ title: objective, objective, targetLang: profile.targetLang }))
+    return toView(localScenario({ title: objective, objective, targetLang: profile.targetLang, nativeLang: profile.nativeLang }))
   }
 }
 
@@ -167,7 +186,8 @@ export async function startScenarioRun(
 
   if (lessonId == null && !topic) throw new Error('Escolha uma lição ou um tema para o cenário.')
 
-  const scenario = lessonId != null ? await ensureLessonScenario(lessonId) : await ensureTopicScenario(topic!)
+  const scenario =
+    lessonId != null ? await ensureLessonScenario(lessonId, profileId) : await ensureTopicScenario(topic!, profileId)
 
   const db = getDb()
   const now = Date.now()
@@ -354,8 +374,9 @@ export async function finishScenarioRun(
   const studentRows = rows.filter((row) => row.role === 'user')
   const corrections: Correction[] = studentRows.flatMap((row) => parseJson<Correction[]>(row.corrections) ?? [])
   const speech = studentRows.map((row) => row.content).join(' ').toLowerCase()
-  const profile = getDefaultProfile()
-  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const profile = profileRow(profileId)
+  if (!profile) throw new Error('Perfil não encontrado.')
+  const locale = localeFor(profile)
   // Contagem de palavras pela escrita do idioma-alvo (CJK não usa espaços).
   const words = studentRows.reduce((sum, row) => sum + tokenize(row.content, profile.targetLang).length, 0)
   const transcript = rows.map((row) => `${row.role === 'user' ? 'aluno' : 'tutor'}: ${row.content}`).join('\n')
@@ -460,7 +481,11 @@ export async function finishScenarioRun(
     .returning()
     .get()
 
-  emitStudentEvent('scenario-finished', conversation.lessonId ? String(conversation.lessonId) : undefined)
+  emitStudentEvent(
+    'scenario-finished',
+    conversation.lessonId ? String(conversation.lessonId) : undefined,
+    profileId
+  )
 
   return {
     runId: run.id,
@@ -483,14 +508,15 @@ export async function finishScenarioRun(
  * Regenera o cenário de uma lição (o aluno pediu outro personagem). A lição
  * continua no mesmo nível e domínio; troca só a encenação.
  */
-export async function refreshLessonScenario(lessonId: number): Promise<ScenarioView> {
-  getDb().update(schema.lessons).set({ scenario: null }).where(eq(schema.lessons.id, lessonId)).run()
-  return ensureLessonScenario(lessonId)
+export async function refreshLessonScenario(lessonId: number, profileId = activeProfileId()): Promise<ScenarioView> {
+  const lesson = requireLessonForProfile(lessonId, profileId)
+  getDb().update(schema.lessons).set({ scenario: null }).where(eq(schema.lessons.id, lesson.id)).run()
+  return ensureLessonScenario(lesson.id, profileId)
 }
 
 /** Canais do modo cenário: abrir roleplay, fechar com rubrica, histórico. */
 export function registerScenarioIpc(): void {
-  const profileId = (): number => getDefaultProfile().id
+  const profileId = (): number => activeProfileId()
 
   handle('scenario:open', (_event, input: { lessonId?: number | null; topic?: string | null }) =>
     startScenarioRun(profileId(), input)

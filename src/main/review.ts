@@ -27,7 +27,7 @@ import {
   type CardPayload
 } from '../core/srs'
 import { recurringErrors } from './notebook'
-import { profileLocale, profileNativeLang } from './locale'
+import { localeFor, nativeLangFor } from './locale'
 import { getDb, schema } from './db'
 
 type CardRow = typeof schema.cards.$inferSelect
@@ -36,14 +36,15 @@ const QUEUE_LIMIT = 20
 
 function toView(row: CardRow, now = Date.now()): CardView {
   const payload = parseContent(row.content)
-  const lang = profileNativeLang()
+  // V2: o card sabe de quem é — rótulo e hint saem no idioma *desse* perfil.
+  const lang = nativeLangFor(row.profileId)
 
   return {
     id: row.id,
     kind: (row.kind as CardView['kind']) ?? 'vocab',
     front: payload?.front ?? row.content,
     back: payload?.back ?? '',
-    hint: payload ? cardHint(payload, profileLocale()) ?? null : null,
+    hint: payload ? cardHint(payload, localeFor(row.profileId)) ?? null : null,
     tag: payload?.tag ?? null,
     lessonId: row.lessonId,
     state: (row.state as CardView['state']) ?? 'new',
@@ -115,7 +116,7 @@ export function createCard(
 /** Cards de vocabulário de uma lição já gerada (template, sem IA). */
 export function cardsForLesson(profileId: number, lessonId: number, vocabulary: LessonVocabularyItem[]): number {
   let created = 0
-  const locale = profileLocale()
+  const locale = localeFor(profileId)
 
   for (const item of vocabulary.slice(0, 8)) {
     if (createCard(profileId, vocabCard(item, lessonId, locale), 'lesson', lessonId)) created += 1
@@ -127,7 +128,7 @@ export function cardsForLesson(profileId: number, lessonId: number, vocabulary: 
 /** Cards a partir dos erros recorrentes do caderno. */
 export function cardsForRecurringErrors(profileId: number, limit = 6): number {
   let created = 0
-  const locale = profileLocale()
+  const locale = localeFor(profileId)
 
   for (const error of recurringErrors(profileId, 2, limit)) {
     if (
@@ -152,7 +153,7 @@ export function cardsForErrorsFrom(
   errors: { original: string; corrected: string; tag: string; note?: string | null }[]
 ): number {
   let created = 0
-  const locale = profileLocale()
+  const locale = localeFor(profileId)
   for (const error of errors) {
     if (createCard(profileId, errorCard(error, locale), 'error')) created += 1
   }
@@ -165,7 +166,7 @@ export function cardsForPhrases(
   lessonId: number | null = null
 ): number {
   let created = 0
-  const locale = profileLocale()
+  const locale = localeFor(profileId)
   for (const phrase of phrases.slice(0, 3)) {
     if (createCard(profileId, phraseCard(phrase.target, phrase.native, lessonId, locale), 'lesson', lessonId)) created += 1
   }
@@ -263,7 +264,7 @@ export function answerReview(profileId: number, cardId: number, rating: ReviewRa
   return {
     cardId,
     rating,
-    nextDueLabel: dueLabel(outcome.due, now.getTime(), profileNativeLang()),
+    nextDueLabel: dueLabel(outcome.due, now.getTime(), nativeLangFor(profileId)),
     dueCount: dueCount(profileId),
     reviewedToday: Number(
       db

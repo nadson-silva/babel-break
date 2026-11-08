@@ -1,6 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { JSX } from 'react'
-import type { DbStatusView, GuidedSession, LanguageOption, ProfileState, ProviderStatus, SettingsPayload } from '../../shared/types'
+import type {
+  DbStatusView,
+  GuidedSession,
+  LanguageOption,
+  ProfileState,
+  ProfilesView,
+  ProviderStatus,
+  SettingsPayload
+} from '../../shared/types'
 import { Sidebar, type View } from './components/Sidebar'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import { t, setUiLanguage } from './i18n'
@@ -12,6 +20,7 @@ import { LessonsScreen } from './screens/LessonsScreen'
 import { NotebookScreen } from './screens/NotebookScreen'
 import { ProgressScreen } from './screens/ProgressScreen'
 import { OnboardingScreen } from './screens/OnboardingScreen'
+import { ProfilesScreen } from './screens/ProfilesScreen'
 import { ReviewScreen } from './screens/ReviewScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
 import { TracksScreen } from './screens/TracksScreen'
@@ -63,6 +72,8 @@ export default function App(): JSX.Element {
   const [view, setView] = useState<View>('home')
   const [settings, setSettings] = useState<SettingsPayload | null>(null)
   const [profileState, setProfileState] = useState<ProfileState | null>(null)
+  // V2: perfis do aparelho (seletor da sidebar + tela de perfis).
+  const [profiles, setProfiles] = useState<ProfilesView | null>(null)
   const [languages, setLanguages] = useState<LanguageOption[]>([])
   const [activeLessonId, setActiveLessonId] = useState<number | null>(null)
   const [guided, setGuided] = useState<GuidedSession | null>(null)
@@ -84,14 +95,16 @@ export default function App(): JSX.Element {
 
   const reload = useCallback(async (): Promise<void> => {
     try {
-      const [nextSettings, nextProfile, review, languageList] = await Promise.all([
+      const [nextSettings, nextProfile, review, languageList, nextProfiles] = await Promise.all([
         window.api.settings.get(),
         window.api.learning.profile.get(),
         window.api.review.state(1),
-        window.api.languages.list().catch(() => [] as LanguageOption[])
+        window.api.languages.list().catch(() => [] as LanguageOption[]),
+        window.api.profiles.list().catch(() => null)
       ])
       setSettings(nextSettings)
       setProfileState(nextProfile)
+      setProfiles(nextProfiles)
       setDueCount(review.dueCount)
       setLanguages(languageList)
       setError(null)
@@ -152,6 +165,44 @@ export default function App(): JSX.Element {
         }}
       />
     )
+  }
+
+  /**
+   * V2: troca de perfil. Além de recarregar o estado, derruba o que estava
+   * aberto — lição, sessão guiada e conversa pertencem ao perfil anterior.
+   */
+  function switchProfile(profileId: number): void {
+    void (async () => {
+      try {
+        const nextProfiles = await window.api.profiles.switch(profileId)
+        const nextProfile = await window.api.learning.profile.get()
+        setProfiles(nextProfiles)
+        setProfileState(nextProfile)
+        setActiveLessonId(null)
+        setGuided(null)
+        setScenarioRequest(null)
+        setTutorConversation(null)
+        setView('home')
+        setRefreshKey((value) => value + 1)
+        await reload()
+      } catch (switchError) {
+        setError(switchError instanceof Error ? switchError.message : String(switchError))
+      }
+    })()
+  }
+
+  /** Perfil novo: nasce sem onboarding, e o gate abaixo já mostra o passo a passo. */
+  function createProfile(): void {
+    void (async () => {
+      try {
+        const state = await window.api.profiles.create({})
+        setProfileState(state)
+        setRefreshKey((value) => value + 1)
+        await reload()
+      } catch (createError) {
+        setError(createError instanceof Error ? createError.message : String(createError))
+      }
+    })()
   }
 
   function navigate(next: View): void {
@@ -216,6 +267,8 @@ export default function App(): JSX.Element {
         settings={settings}
         dueCount={guided || activeLessonId != null ? 0 : dueCount}
         aiStatus={aiStatus}
+        profiles={profiles}
+        onSwitchProfile={switchProfile}
       />
       <main className="flex min-w-0 flex-1 flex-col bg-surface">
         {/* M6 (E1): uma tela que joga derruba só a área de telas, nunca a janela. */}
@@ -286,6 +339,16 @@ export default function App(): JSX.Element {
           <ReviewScreen key={`review-${refreshKey}`} onChanged={refreshBadges} />
         ) : view === 'notebook' ? (
           <NotebookScreen key={`notebook-${refreshKey}`} />
+        ) : view === 'profiles' ? (
+          <ProfilesScreen
+            key={`profiles-${refreshKey}`}
+            profiles={profiles}
+            onChanged={() => {
+              void reload()
+              setRefreshKey((value) => value + 1)
+            }}
+            onCreate={createProfile}
+          />
         ) : view === 'progress' ? (
           <ProgressScreen key={`progress-${refreshKey}`} onOpenSettings={() => navigate('settings')} />
         ) : (

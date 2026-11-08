@@ -58,12 +58,38 @@ const CHANNEL_CONTRACTS = {
 
   // --- perfil / placement / currículo ---------------------------------------
   'profile:get': noArgs,
+  'profile:list': noArgs,
+  'profile:switch': z.tuple([id]),
+  'profile:create': z.tuple([
+    z
+      .object({
+        name: z.string().max(80).nullable().optional(),
+        color: z.string().max(20).nullable().optional(),
+        targetLang: z.string().max(10).optional(),
+        nativeLang: z.string().max(10).optional(),
+        goal: z.string().max(500).optional(),
+        cefr: cefr.optional()
+      })
+      .optional()
+  ]),
+  'profile:update': z.tuple([
+    z.object({
+      profileId: id.optional(),
+      name: z.string().max(80).nullable().optional(),
+      color: z.string().max(20).nullable().optional(),
+      goal: z.string().max(500).nullable().optional(),
+      focusMix: z.number().min(0).max(1).optional()
+    })
+  ]),
+  'profile:delete': z.tuple([z.object({ profileId: id, acknowledged: z.boolean() })]),
   'profile:onboard': z.tuple([
     z.object({
       goal: z.string().max(500),
       cefr,
       targetLang: z.string().max(10).optional(),
-      nativeLang: z.string().max(10).optional()
+      nativeLang: z.string().max(10).optional(),
+      name: z.string().max(80).nullable().optional(),
+      color: z.string().max(20).nullable().optional()
     })
   ]),
   'profile:reset-memory': noArgs,

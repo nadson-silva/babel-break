@@ -1,9 +1,23 @@
 import type { JSX } from 'react'
-import type { ProviderStatus, SettingsPayload } from '../../../shared/types'
+import { useState } from 'react'
+import type { ProfilesView, ProviderStatus, SettingsPayload } from '../../../shared/types'
 import { t } from '../i18n'
+import { targetLabel } from '../lang'
+import { ProfileAvatar } from './ProfileAvatar'
 import { AiStatusChip } from './AiStatus'
 
-export type View = 'home' | 'lessons' | 'tracks' | 'tutor' | 'review' | 'notebook' | 'progress' | 'settings'
+export type View =
+  | 'home'
+  | 'lessons'
+  | 'tracks'
+  | 'tutor'
+  | 'review'
+  | 'notebook'
+  | 'progress'
+  | 'voice'
+  | 'profiles'
+  | 'data'
+  | 'settings'
 
 interface SidebarProps {
   view: View
@@ -12,6 +26,9 @@ interface SidebarProps {
   dueCount?: number
   /** M5: disponibilidade da IA (chip no rodapé) — null até a primeira sonda. */
   aiStatus?: ProviderStatus | null
+  /** V2: perfis do aparelho + troca rápida pelo cabeçalho da sidebar. */
+  profiles?: ProfilesView | null
+  onSwitchProfile?: (profileId: number) => void
 }
 
 function HomeIcon(): JSX.Element {
@@ -70,6 +87,124 @@ function SettingsIcon(): JSX.Element {
         strokeLinejoin="round"
       />
     </svg>
+  )
+}
+
+function ProfilesIcon(): JSX.Element {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" className="size-4" aria-hidden="true">
+      <circle cx="9" cy="8.5" r="3" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M3.5 19c.6-3 2.8-4.5 5.5-4.5S13.9 16 14.5 19" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M16 6.2a2.6 2.6 0 0 1 0 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+      <path d="M17.6 14.9c2.1.4 3.3 1.9 3.7 4.1" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+/**
+ * V2: cabeçalho de perfil. Um clique abre a lista; trocar derruba stream dos
+ * outros perfis no main e recarrega as telas no renderer.
+ */
+function ProfileSwitcher({
+  profiles,
+  onSwitchProfile,
+  onOpenProfiles
+}: {
+  profiles: ProfilesView | null
+  onSwitchProfile: (profileId: number) => void
+  onOpenProfiles: () => void
+}): JSX.Element {
+  const [open, setOpen] = useState(false)
+  const active = profiles?.profiles.find((entry) => entry.active) ?? null
+
+  return (
+    <div className="relative mt-4">
+      <button
+        type="button"
+        data-profile-switcher
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className="flex w-full items-center gap-2.5 rounded-xl border border-line bg-panel-2 px-2.5 py-2 text-left transition-colors hover:border-accent/40"
+      >
+        {active ? (
+          <ProfileAvatar
+            name={active.name}
+            color={active.color}
+            targetLang={active.targetLang}
+            size="sm"
+            active
+          />
+        ) : (
+          <span className="grid size-7 shrink-0 place-items-center rounded-xl bg-panel-2 text-[10px] font-bold text-faint">
+            ?
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-semibold leading-tight">
+            {active?.name?.trim() || (active ? targetLabel(active.targetLang) : t.profiles.title)}
+          </span>
+          <span className="block truncate text-[10px] leading-tight text-faint">
+            {active ? targetLabel(active.targetLang) : t.profiles.empty}
+          </span>
+        </span>
+        <svg viewBox="0 0 24 24" fill="none" className="size-3.5 shrink-0 text-faint" aria-hidden="true">
+          <path d="m8 10 4 4 4-4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 right-0 z-20 mt-2 overflow-hidden rounded-xl border border-line bg-panel shadow-xl"
+        >
+          <ul className="max-h-64 overflow-y-auto">
+            {(profiles?.profiles ?? []).map((entry) => (
+              <li key={entry.id}>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false)
+                    if (!entry.active) onSwitchProfile(entry.id)
+                  }}
+                  aria-current={entry.active ? 'page' : undefined}
+                  className={`flex w-full items-center gap-2.5 px-3 py-2 text-left transition-colors hover:bg-panel-2 ${
+                    entry.active ? 'bg-accent-soft' : ''
+                  }`}
+                >
+                  <ProfileAvatar
+                    name={entry.name}
+                    color={entry.color}
+                    targetLang={entry.targetLang}
+                    size="sm"
+                    active={entry.active}
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">
+                      {entry.name?.trim() || targetLabel(entry.targetLang)}
+                    </span>
+                    <span className="block truncate text-[10px] text-faint">
+                      {targetLabel(entry.targetLang)} · {t.profiles.dueCards}: {entry.dueCards}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false)
+              onOpenProfiles()
+            }}
+            className="w-full border-t border-line px-3 py-2 text-left text-xs text-muted transition-colors hover:bg-panel-2 hover:text-ink"
+          >
+            {t.profiles.manage}
+          </button>
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -165,7 +300,15 @@ function ProgressIcon(): JSX.Element {
   )
 }
 
-export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = null }: SidebarProps): JSX.Element {
+export function Sidebar({
+  view,
+  onNavigate,
+  settings,
+  dueCount = 0,
+  aiStatus = null,
+  profiles = null,
+  onSwitchProfile = () => undefined
+}: SidebarProps): JSX.Element {
   const model = settings.provider === 'gemini' ? settings.geminiModel : settings.ollamaModel
   const providerLabel = settings.provider === 'gemini' ? t.provider.gemini : t.provider.ollama
   const secure =
@@ -185,7 +328,16 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = n
         </div>
       </div>
 
-      <nav className="space-y-1 px-3">
+      {/* V2: quem está estudando neste aparelho, com troca rápida. */}
+      <div className="px-3">
+        <ProfileSwitcher
+          profiles={profiles}
+          onSwitchProfile={onSwitchProfile}
+          onOpenProfiles={() => onNavigate('profiles')}
+        />
+      </div>
+
+      <nav className="mt-3 space-y-1 px-3">
         <NavButton
           active={view === 'home'}
           target="home"
@@ -235,6 +387,13 @@ export function Sidebar({ view, onNavigate, settings, dueCount = 0, aiStatus = n
           onClick={() => onNavigate('progress')}
           icon={<ProgressIcon />}
           label={t.nav.progress}
+        />
+        <NavButton
+          active={view === 'profiles'}
+          target="profiles"
+          onClick={() => onNavigate('profiles')}
+          icon={<ProfilesIcon />}
+          label={t.nav.profiles}
         />
         <NavButton
           active={view === 'settings'}

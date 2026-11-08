@@ -32,7 +32,6 @@ import { clampLevel } from '../core/cefr'
 import { recast as bankRecast } from '../core/interference'
 import {
   correctionPrompt,
-  promptLocale,
   summaryPrompt,
   tutorOpenerMessage,
   tutorSystem,
@@ -43,9 +42,10 @@ import {
 } from '../core/prompts'
 import { correctionSetSchema, conversationSummarySchema } from '../core/schemas'
 import { currentModel, generateStructured, trackedStream } from './ai'
-import { getDb, getDefaultProfile, schema } from './db'
+import { getDb, schema } from './db'
+import { lessonForProfile } from './scope'
 import { emitStudentEvent } from './events'
-import { profileInterferenceRules, profileNativeLang } from './locale'
+import { interferenceRulesForProfile, localeFor, nativeLangFor } from './locale'
 import { runtimeText } from '../core/runtime-text'
 import { errorHints, recordCorrections } from './notebook'
 import { cardsForErrorsFrom } from './review'
@@ -59,7 +59,14 @@ type ProfileRow = typeof schema.profiles.$inferSelect
 /** Mensagens mantidas literalmente na janela rolante do prompt. */
 const WINDOW = 12
 
-const activeRequests = new Map<string, AbortController>()
+interface LiveTurn {
+  controller: AbortController
+  /** V2: de quem é este turno — trocar de perfil cancela só o dele. */
+  profileId: number
+  conversationId: number
+}
+
+const activeRequests = new Map<string, LiveTurn>()
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -184,8 +191,14 @@ function touch(conversationId: number): void {
     .run()
 }
 
+/**
+ * V2 (D2): perfil inexistente é erro, não "o primeiro perfil do aparelho".
+ * Sem isto, um id de perfil apagado devolvia prompts, tags e idioma de outro aluno.
+ */
 function profileOf(profileId: number): ProfileRow {
-  return getDb().select().from(schema.profiles).where(eq(schema.profiles.id, profileId)).get() ?? getDefaultProfile()
+  const row = getDb().select().from(schema.profiles).where(eq(schema.profiles.id, profileId)).get()
+  if (!row) throw new Error('Perfil não encontrado.')
+  return row
 }
 
 /** Lição ligada à conversa: structures e vocabulário que devem reaparecer. */
@@ -281,7 +294,7 @@ function buildContext(profileId: number, conversation: ConversationRow): TutorCo
     lesson: lesson ? { title: lesson.title, objective: lesson.objective, grammar: lesson.grammar } : null,
     topic: conversation.topic,
     scenario,
-    locale: promptLocale(profile.targetLang, profile.nativeLang)
+    locale: localeFor(profile)
   }
 }
 
@@ -311,7 +324,7 @@ function streamReply(
 ): Promise<string> {
   const model = currentModel()
   if (!model) {
-    return Promise.reject(new Error('Nenhum modelo selecionado. Escolha um modelo em Configurações.'))
+    return Promise.reject(new Error(runtimeText(context.locale.native.code, 'error.noModelStream')))
   }
 
   // M6 (C2/C3): stream monitorado — conta no aiInFlight (a pré-geração espera
@@ -398,11 +411,17 @@ export async function createConversation(
   input: { topic?: string | null; lessonId?: number | null; mode?: ConversationMode } = {}
 ): Promise<ConversationView> {
   const now = Date.now()
+  // V2 (D2): amarrar a conversa a uma lição exige que a lição seja do perfil.
+  const lessonId = input.lessonId ?? null
+  if (lessonId != null && !lessonForProfile(lessonId, profileId)) {
+    throw new Error('Lição não encontrada.')
+  }
+
   const created = getDb()
     .insert(schema.conversations)
     .values({
       profileId,
-      lessonId: input.lessonId ?? null,
+      lessonId,
       mode: input.mode ?? 'free',
       topic: input.topic?.trim() || null,
       summary: null,
@@ -453,14 +472,19 @@ export async function sendTurn(
   const text = input.text.trim()
   const conversation = conversationOf(profileId, input.conversationId)
 
-  if (!conversation) return { ok: false, error: 'Conversa não encontrada.' }
-  if (!text) return { ok: false, error: 'Escreva no idioma que você está estudando antes de enviar.' }
+  const native = profileOf(profileId).nativeLang
+  if (!conversation) return { ok: false, error: runtimeText(native, 'conversation.notFound') }
+  if (!text) return { ok: false, error: runtimeText(native, 'chat.emptyMessage') }
   if (!currentModel()) {
-    return { ok: false, error: 'Nenhum modelo selecionado. Escolha um modelo em Configurações.' }
+    return { ok: false, error: runtimeText(native, 'error.noModelStream') }
   }
 
   const controller = new AbortController()
-  activeRequests.set(input.requestId, controller)
+  activeRequests.set(input.requestId, {
+    controller,
+    profileId,
+    conversationId: input.conversationId
+  })
   // M6 (E4): todo evento do turno nasce carimbado com a conversa — o canal é
   // global e a troca de conversa no meio do turno não pode despejar eventos aqui.
   const send = (event: ChatEvent): void => emit({ ...event, conversationId: input.conversationId })
@@ -469,15 +493,15 @@ export async function sendTurn(
     const profile = profileOf(profileId)
     const level = clampLevel(profile.cefr)
     const hints = errorHints(profileId, 6)
-    const locale = promptLocale(profile.targetLang, profile.nativeLang)
+    const locale = localeFor(profile)
 
     // 1. Correção determinística pelo banco do par (se existir); depois a passada de IA.
     send({ requestId: input.requestId, type: 'status', message: 'corrigindo' })
-    const deterministic = bankCorrections(text, profileInterferenceRules())
+    const deterministic = bankCorrections(text, interferenceRulesForProfile(profileId))
     const { model: modelCorrections, recast: aiRecast } = await correctWithModel(text, level, hints, locale)
 
     const corrections = mergeCorrections(deterministic, modelCorrections)
-    const recast = aiRecast || bankRecast(text, profileInterferenceRules())
+    const recast = aiRecast || bankRecast(text, interferenceRulesForProfile(profileId))
 
     // 2. Caderno de erros + correções inline para o renderer.
     recordCorrections(profileId, corrections, {
@@ -503,9 +527,7 @@ export async function sendTurn(
     const reply = await streamTutorWithTokens(context, turn, controller.signal, send, input.requestId)
 
     if (!reply.trim()) {
-      throw new Error(
-        'O modelo não retornou texto. Se ele usa raciocínio interno (thinking), escolha outro modelo em Configurações.'
-      )
+      throw new Error(runtimeText(profile.nativeLang, 'error.emptyReply'))
     }
 
     getDb()
@@ -582,8 +604,22 @@ async function correctWithModel(
 }
 
 export function cancelTurn(requestId: string): void {
-  activeRequests.get(requestId)?.abort()
+  activeRequests.get(requestId)?.controller.abort()
   activeRequests.delete(requestId)
+}
+
+/**
+ * V2: trocar de perfil derruba os turnos em andamento **dos outros** perfis.
+ * Sem isto, um stream do perfil A continuaria gravando mensagens e queimando
+ * tokens enquanto a tela já mostra o perfil B.
+ */
+export function cancelTurnsExceptProfile(profileId: number): number {
+  const doomed = [...activeRequests.entries()].filter(([, turn]) => turn.profileId !== profileId)
+  for (const [requestId] of doomed) {
+    activeRequests.get(requestId)?.controller.abort()
+    activeRequests.delete(requestId)
+  }
+  return doomed.length
 }
 
 /** Resumo rolante: compacta o começo da conversa quando a janela enche. */
@@ -604,7 +640,7 @@ async function maybeSummarize(profileId: number, conversationId: number): Promis
     const prompt = summaryPrompt({
       current: conversation.summary,
       transcript,
-      locale: promptLocale(profile.targetLang, profile.nativeLang)
+      locale: localeFor(profile)
     })
     const result = await generateStructured(conversationSummarySchema, {
       system: prompt.system,
@@ -719,7 +755,7 @@ export function buildRecap(
       cardsCreated,
       levelChange,
       extra.scenario ?? null,
-      profileNativeLang()
+      nativeLangFor(profileId)
     )
   }
 }
@@ -773,14 +809,11 @@ export function closeConversation(
   extra: RecapExtras = {}
 ): RecapView {
   const db = getDb()
-  const corrections = messagesOf(conversationId).flatMap((row) => parseCorrections(row.corrections))
+  // V2 (D2): valida a posse ANTES de ler as mensagens — mensagens de conversa
+  // alheia não descem para outro perfil.
+  const conversation = conversationOf(profileId, conversationId)
+  const corrections = conversation ? messagesOf(conversationId).flatMap((row) => parseCorrections(row.corrections)) : []
   const now = Date.now()
-
-  const conversation = db
-    .select()
-    .from(schema.conversations)
-    .where(and(eq(schema.conversations.id, conversationId), eq(schema.conversations.profileId, profileId)))
-    .get()
 
   if (!conversation || conversation.closedAt != null) {
     // Recado do segundo fechamento (ou de outra profile): refaz a leitura, não
@@ -793,7 +826,7 @@ export function closeConversation(
       practice: extra.practice,
       levelChange: null,
       scenario: extra.scenario ?? null,
-      message: recapMessage(corrections, 0, null, extra.scenario ?? null, profileNativeLang())
+      message: recapMessage(corrections, 0, null, extra.scenario ?? null, nativeLangFor(profileId))
     }
   }
 
@@ -828,7 +861,7 @@ export function closeConversation(
       .run()
   })
 
-  emitStudentEvent('conversation-closed', String(conversationId))
+  emitStudentEvent('conversation-closed', String(conversationId), profileId)
 
   return recap
 }

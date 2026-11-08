@@ -11,11 +11,12 @@ import { handle } from './ipc-contract'
 import { desc, eq } from 'drizzle-orm'
 import type { HomeState, LessonSummary, NextSuggestion } from '../shared/types'
 import { pickRecommendationOrigin } from '../core/tracks'
-import { getDb, getDefaultProfile, schema } from './db'
-import { profileNativeLang } from './locale'
+import { getDb, schema } from './db'
+import { activeProfileId, profileViewOf } from './profiles'
+import { nativeLangFor } from './locale'
 import { runtimeText } from '../core/runtime-text'
 import { focusFor } from './notebook'
-import { curriculumView, lastOpenedLesson, pendingLessons, profileView } from './learning'
+import { curriculumView, lastOpenedLesson, pendingLessons } from './learning'
 import { reviewState } from './review'
 import { activeGuidedSession } from './guided'
 import { tracksView } from './tracks'
@@ -48,7 +49,8 @@ function suggestionFor(
   base: LessonSummary[],
   focus: LessonSummary[],
   focusMix: number,
-  history: ('base' | 'focus')[]
+  history: ('base' | 'focus')[],
+  lang: string
 ): NextSuggestion | null {
   const origin = pickRecommendationOrigin({
     focusMix,
@@ -64,7 +66,6 @@ function suggestionFor(
 
   // M5: o motivo da sugestão é texto do main, então sai no idioma das
   // explicações do perfil (não é string de interface).
-  const lang = profileNativeLang()
   const reason =
     origin === 'focus'
       ? runtimeText(lang, 'suggest.track', { title: lesson.trackTitle ?? '' })
@@ -75,9 +76,15 @@ function suggestionFor(
   return { lesson, origin, reason }
 }
 
-export function homeState(): HomeState {
-  const profile = getDefaultProfile()
-  const curriculum = curriculumView()
+export function homeState(profileId = activeProfileId()): HomeState {
+  const profile = getDb()
+    .select()
+    .from(schema.profiles)
+    .where(eq(schema.profiles.id, profileId))
+    .get()
+  if (!profile) throw new Error('Perfil não encontrado.')
+
+  const curriculum = curriculumView(profile.id)
   const lessons = curriculum.units.flatMap((unit) => unit.lessons)
   const pending = pendingLessons(profile.id)
 
@@ -86,7 +93,7 @@ export function homeState(): HomeState {
   const tracks = tracksView(profile.id)
 
   return {
-    profile: profileView(profile),
+    profile: profileViewOf(profile),
     curriculumReady: curriculum.generated,
     continueLesson: lastOpenedLesson(profile.id),
     nextLesson: pending.base[0] ?? null,
@@ -103,7 +110,13 @@ export function homeState(): HomeState {
     continueConversation: latestConversation(profile.id),
     guided: activeGuidedSession(profile.id),
     tracks: tracks.active,
-    suggestion: suggestionFor(pending.base, pending.focus, tracks.focusMix, recentOrigins(profile.id))
+    suggestion: suggestionFor(
+      pending.base,
+      pending.focus,
+      tracks.focusMix,
+      recentOrigins(profile.id),
+      nativeLangFor(profile.id)
+    )
   }
 }
 

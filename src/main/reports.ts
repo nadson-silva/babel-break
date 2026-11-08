@@ -21,7 +21,9 @@ import type { ReportInput, ReportItemView, ReportsSummary } from '../shared/type
 import type { ReportKind } from '../shared/report-reasons'
 import { effectFor, isReportKind, isReportReason, reasonFor, snapshotText } from '../core/reports'
 import { normalizeTag } from './notebook'
-import { getDb, getDefaultProfile, schema } from './db'
+import { getDb, schema } from './db'
+import { activeProfileId } from './profiles'
+import { errorForProfile, reportTargetForProfile, profileErrorRows } from './scope'
 
 // M6 (C7): as rotinas de escrita aceitam o handle do banco OU uma transação.
 type DbHandle = ReturnType<typeof getDb>
@@ -49,7 +51,7 @@ function now(): number {
 }
 
 /** Rótulo do alvo no momento do report — o registro precisa fazer sentido sozinho. */
-function labelForTarget(kind: ReportInput['kind'], targetId: number | null): string | null {
+function labelForTarget(kind: ReportInput['kind'], targetId: number | null, profileId: number): string | null {
   if (targetId == null) return null
   const db = getDb()
 
@@ -57,37 +59,37 @@ function labelForTarget(kind: ReportInput['kind'], targetId: number | null): str
     const row = db
       .select({
         type: schema.exercises.type,
-        lessonTitle: schema.lessons.title,
-        prompt: schema.exercises.payload
+        lessonTitle: schema.lessons.title
       })
       .from(schema.exercises)
       .innerJoin(schema.lessons, eq(schema.lessons.id, schema.exercises.lessonId))
       .where(eq(schema.exercises.id, targetId))
       .get()
-    if (!row) return null
+    if (!row || !reportTargetForProfile('exercise', targetId, profileId)) return null
     return `${row.lessonTitle} · ${row.type}`
   }
 
   if (kind === 'lesson_content' || kind === 'scenario') {
-    return db.select({ title: schema.lessons.title }).from(schema.lessons).where(eq(schema.lessons.id, targetId)).get()
-      ?.title ?? null
+    // `targetExists` abaixo garante o perfil; aqui só se lê o rótulo.
+    return (
+      db.select({ title: schema.lessons.title }).from(schema.lessons).where(eq(schema.lessons.id, targetId)).get()
+        ?.title ?? null
+    )
   }
 
   if (kind === 'correction') {
-    const error = db
-      .select({ tag: schema.errors.tag })
-      .from(schema.errors)
-      .where(eq(schema.errors.id, targetId))
-      .get()
+    const error = errorForProfile(targetId, profileId)
     return error?.tag ?? null
   }
 
   if (kind === 'track_plan') {
-    return db
-      .select({ title: schema.focusTracks.title })
-      .from(schema.focusTracks)
-      .where(eq(schema.focusTracks.id, targetId))
-      .get()?.title ?? null
+    return (
+      db
+        .select({ title: schema.focusTracks.title })
+        .from(schema.focusTracks)
+        .where(eq(schema.focusTracks.id, targetId))
+        .get()?.title ?? null
+    )
   }
 
   if (kind === 'chat_reply') {
@@ -103,35 +105,12 @@ function labelForTarget(kind: ReportInput['kind'], targetId: number | null): str
   return null
 }
 
-/** Alvo existe? Report sem alvo válido é registrado, mas sem efeito. */
-function targetExists(kind: ReportInput['kind'], targetId: number | null): boolean {
-  if (targetId == null) return false
-  const db = getDb()
-
-  switch (kind) {
-    case 'exercise':
-      return db.select({ id: schema.exercises.id }).from(schema.exercises).where(eq(schema.exercises.id, targetId)).get() != null
-    case 'correction':
-      return db.select({ id: schema.errors.id }).from(schema.errors).where(eq(schema.errors.id, targetId)).get() != null
-    case 'track_plan':
-      return (
-        db
-          .select({ id: schema.focusTracks.id })
-          .from(schema.focusTracks)
-          .where(eq(schema.focusTracks.id, targetId))
-          .get() != null
-      )
-    case 'chat_reply':
-      return (
-        db
-          .select({ id: schema.conversations.id })
-          .from(schema.conversations)
-          .where(eq(schema.conversations.id, targetId))
-          .get() != null
-      )
-    default:
-      return db.select({ id: schema.lessons.id }).from(schema.lessons).where(eq(schema.lessons.id, targetId)).get() != null
-  }
+/**
+ * Alvo existe **e é do perfil**? Report sem alvo válido é registrado, mas sem
+ * efeito (V2/D2: id de outro perfil não bloqueia nem desbloqueia nada aqui).
+ */
+function targetExists(kind: ReportInput['kind'], targetId: number | null, profileId: number): boolean {
+  return reportTargetForProfile(kind, targetId, profileId)
 }
 
 /**
@@ -139,19 +118,18 @@ function targetExists(kind: ReportInput['kind'], targetId: number | null): boole
  * pelo par (tag, frase original) a anotação aberta mais recente. É a mesma
  * normalização que o caderno usa para agrupar recorrência.
  */
-function resolveCorrectionErrorId(tag: string | undefined, original: string | undefined): number | null {
+function resolveCorrectionErrorId(
+  profileId: number,
+  tag: string | undefined,
+  original: string | undefined
+): number | null {
   const wanted = (original ?? '').trim()
   if (!wanted) return null
   const normalized = normalizeTag(tag ?? '')
   const compact = (value: string): string => value.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '')
 
-  const rows = getDb()
-    .select({ id: schema.errors.id, tag: schema.errors.tag, original: schema.errors.original })
-    .from(schema.errors)
-    .where(and(isNull(schema.errors.resolvedAt), isNull(schema.errors.disputedAt)))
-    .orderBy(desc(schema.errors.lastSeenAt))
-    .limit(80)
-    .all()
+  // V2 (D2): a busca por frase varria os erros de **todos** os perfis.
+  const rows = profileErrorRows(profileId, 80)
 
   const byPhrase = rows.find((row) => compact(row.original) === compact(wanted))
   if (byPhrase) return byPhrase.id
@@ -179,11 +157,12 @@ function toView(row: ReportRow): ReportItemView {
 function applyEffect(
   input: ReportInput,
   targetId: number | null,
+  profileId: number,
   db: DbHandle | TxHandle = getDb()
 ): ReportItemView['effect'] {
   const declared = effectFor(input.kind)
   if (declared === 'logged') return 'logged'
-  if (!targetExists(input.kind, targetId)) return 'logged'
+  if (!targetExists(input.kind, targetId, profileId)) return 'logged'
 
   const stamp = now()
 
@@ -223,14 +202,13 @@ function stillReported(kind: ReportInput['kind'], targetId: number | null, excep
   return Number(row?.value ?? 0) > 0
 }
 
-export function submitReport(input: ReportInput): ReportItemView {
+export function submitReport(input: ReportInput, profileId = activeProfileId()): ReportItemView {
   if (!isReportKind(input.kind)) throw new Error('Tipo de conteúdo desconhecido para reportar.')
 
-  const profile = getDefaultProfile()
   const explicit = typeof input.targetId === 'number' && Number.isFinite(input.targetId) ? input.targetId : null
   const targetId =
     explicit ??
-    (input.kind === 'correction' ? resolveCorrectionErrorId(input.context?.tag, input.context?.text) : null)
+    (input.kind === 'correction' ? resolveCorrectionErrorId(profileId, input.context?.tag, input.context?.text) : null)
   const reason = isReportReason(input.reason) ? input.reason : reasonFor(input.kind, input.reason)
 
   const context: Context = {
@@ -242,19 +220,19 @@ export function submitReport(input: ReportInput): ReportItemView {
   // M6 (C7): efeito + registro numa transação só. Antes, uma falha entre os
   // dois deixava exercício bloqueado SEM report gravado — estado não-annulável.
   const row = getDb().transaction((tx) => {
-    const effect = applyEffect({ ...input, reason }, targetId, tx)
+    const effect = applyEffect({ ...input, reason }, targetId, profileId, tx)
 
     return tx
       .insert(schema.contentReports)
       .values({
-        profileId: profile.id,
+        profileId,
         kind: input.kind,
         targetId,
         reason,
         effect,
         note: snapshotText(input.note, 600) ?? null,
         context: Object.values(context).some(Boolean) ? JSON.stringify(context) : null,
-        targetLabel: snapshotText(labelForTarget(input.kind, targetId), 160) ?? null,
+        targetLabel: snapshotText(labelForTarget(input.kind, targetId, profileId), 160) ?? null,
         createdAt: now()
       })
       .returning()
@@ -264,7 +242,7 @@ export function submitReport(input: ReportInput): ReportItemView {
   return toView(row)
 }
 
-export function undoReport(reportId: number, profileId = getDefaultProfile().id): ReportItemView | null {
+export function undoReport(reportId: number, profileId = activeProfileId()): ReportItemView | null {
   const db = getDb()
   // M6 (D2): o report só pode ser desfeito pelo próprio perfil — sem escopo,
   // um report de outro perfil liberaria alheio.
@@ -289,6 +267,8 @@ export function undoReport(reportId: number, profileId = getDefaultProfile().id)
 
     if (stillReported(kind, targetId, reportId)) return
 
+    // V2 (D2): reabrir alvo também exige posse — senão o undo de A desbloqueia B.
+    if (!targetExists(kind, targetId, profileId)) return
     if (kind === 'exercise' && targetId != null) {
       tx.update(schema.exercises).set({ blocked: false }).where(eq(schema.exercises.id, targetId)).run()
     }
@@ -307,7 +287,11 @@ export function undoReport(reportId: number, profileId = getDefaultProfile().id)
  * Desfaz o report mais recente sobre um alvo (o caderno mostra "reativar correção"
  * sem conhecer o id do report).
  */
-export function undoReportForTarget(kind: ReportKind, targetId: number, profileId = getDefaultProfile().id): ReportItemView | null {
+export function undoReportForTarget(
+  kind: ReportKind,
+  targetId: number,
+  profileId = activeProfileId()
+): ReportItemView | null {
   const row = getDb()
     .select({ id: schema.contentReports.id })
     .from(schema.contentReports)
@@ -357,6 +341,6 @@ export function registerReportsIpc(): void {
     undoReportForTarget(kind, targetId)
   )
   handle('report:list', (_event, limit?: number) =>
-    reportsSummary(getDefaultProfile().id, limit)
+    reportsSummary(activeProfileId(), limit)
   )
 }

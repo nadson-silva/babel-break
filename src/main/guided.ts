@@ -246,7 +246,7 @@ export async function startGuidedSession(profileId: number): Promise<GuidedSessi
   // Abre a lição (gera conteúdo/exercícios se preciso) já no início, para o
   // aluno não esperar na etapa 2.
   try {
-    await openLesson(lesson.id)
+    await openLesson(lesson.id, profileId)
   } catch (error) {
     console.warn('[guided] não foi possível preparar a lição:', errorMessage(error))
   }
@@ -360,7 +360,11 @@ export async function finishGuidedSession(profileId: number, input: GuidedFinish
 
   // M5: o fim de uma sessão guiada é o gatilho natural do aquecimento ocioso —
   // é aqui que o app sabe qual lição vem depois.
-  emitStudentEvent('lesson-finished', summary.lessonId ? String(summary.lessonId) : undefined)
+  emitStudentEvent(
+    'lesson-finished',
+    summary.lessonId ? String(summary.lessonId) : undefined,
+    profileId
+  )
 
   return {
     id: row.id,

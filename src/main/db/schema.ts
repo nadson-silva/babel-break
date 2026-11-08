@@ -1,7 +1,15 @@
-import { index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
+import { blob, index, integer, primaryKey, real, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 
+/**
+ * V2: perfis múltiplos. `name`/`color` identificam o perfil na UI,
+ * `last_used_at` ordena o seletor, e o perfil ativo mora em `settings`
+ * (chave `activeProfile`) — nunca num singleton de módulo.
+ */
 export const profiles = sqliteTable('profiles', {
   id: integer('id').primaryKey({ autoIncrement: true }),
+  name: text('name'),
+  /** Rótulo de cor estável do avatar (chave da paleta do renderer). */
+  color: text('color'),
   targetLang: text('target_lang').notNull().default('en'),
   nativeLang: text('native_lang').notNull().default('pt-BR'),
   goal: text('goal'),
@@ -10,7 +18,8 @@ export const profiles = sqliteTable('profiles', {
   prefs: text('prefs'),
   onboardingCompletedAt: integer('onboarding_completed_at'),
   placementScore: real('placement_score'),
-  createdAt: integer('created_at').notNull()
+  createdAt: integer('created_at').notNull(),
+  lastUsedAt: integer('last_used_at')
 })
 
 export const skillsState = sqliteTable(
@@ -42,29 +51,41 @@ export const units = sqliteTable('units', {
   createdAt: integer('created_at').notNull()
 })
 
-export const lessons = sqliteTable('lessons', {
-  id: integer('id').primaryKey({ autoIncrement: true }),
-  unitId: integer('unit_id'),
-  trackId: integer('track_id'),
-  title: text('title').notNull(),
-  objective: text('objective'),
-  level: text('level').notNull(),
-  content: text('content'),
-  scenario: text('scenario'),
-  position: integer('position').notNull().default(0),
-  version: integer('version').notNull().default(1),
-  /**
-   * M5 (pré-geração): marcado quando o conteúdo nasceu da pré-geração, e não de
-   * uma abertura do aluno — é o que faz a lição abrir instantânea e offline.
-   */
-  prewarmedAt: integer('prewarmed_at'),
-  /**
-   * M5 (reportar conteúdo ruim): conteúdo marcado como ruim pelo aluno. A
-   * próxima abertura regenera em vez de reaproveitar o cache.
-   */
-  staleAt: integer('stale_at'),
-  createdAt: integer('created_at').notNull()
-})
+export const lessons = sqliteTable(
+  'lessons',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    unitId: integer('unit_id'),
+    trackId: integer('track_id'),
+    /**
+     * V2: dono explícito da lição. Antes a posse era deduzida pela cadeia
+     * (`unit_id → units.profile_id` OU `track_id → focus_tracks.profile_id`), o
+     * que obrigava todo handler a fazer join e deixava lição órfã sem dono. Com
+     * múltiplos perfis e export/import isto é a coluna de escopo.
+     */
+    profileId: integer('profile_id'),
+    title: text('title').notNull(),
+    objective: text('objective'),
+    level: text('level').notNull(),
+    content: text('content'),
+    scenario: text('scenario'),
+    position: integer('position').notNull().default(0),
+    version: integer('version').notNull().default(1),
+    /**
+     * M5 (pré-geração): marcado quando o conteúdo nasceu da pré-geração, e não de
+     * uma abertura do aluno — é o que faz a lição abrir instantânea e offline.
+     */
+    prewarmedAt: integer('prewarmed_at'),
+    /**
+     * M5 (reportar conteúdo ruim): conteúdo marcado como ruim pelo aluno. A
+     * próxima abertura regenera em vez de reaproveitar o cache.
+     */
+    staleAt: integer('stale_at'),
+    createdAt: integer('created_at').notNull()
+  },
+  // V2: todo caminho quente (catálogo, home, painel, cache, export) filtra por perfil.
+  (t) => [index('lessons_profile_idx').on(t.profileId)]
+)
 
 // M6 (C5/C6): índice no caminho quente + FK com cascade — apagar a lição não
 // deixa itens órfãos (e export/import da v2 não exporta perfil corrompido).
@@ -292,6 +313,69 @@ export const contentReports = sqliteTable('content_reports', {
   createdAt: integer('created_at').notNull(),
   /** Report desfeito: o alvo volta a valer (exercicio desbloqueado, erro reativado). */
   undoneAt: integer('undone_at')
+})
+
+/**
+ * V2 — prática de voz: uma fala do aluno (ouvir + repetir) com score.
+ *
+ * `metrics` guarda o JSON do alinhamento determinístico (`core/pronunciation.ts`):
+ * palavras faltando/sobrando/trocadas e a nota por palavra. O score é a única
+ * escala do app (0–1, ver `core/score.ts`), então `speaking`/`listening` entram
+ * no mesmo blend das outras habilidades.
+ */
+export const speechRuns = sqliteTable(
+  'speech_runs',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    profileId: integer('profile_id')
+      .notNull()
+      .references(() => profiles.id, { onDelete: 'cascade' }),
+    lessonId: integer('lesson_id'),
+    /** Exercício que originou a fala ( quando veio da prática de lição). */
+    exerciseId: integer('exercise_id'),
+    /** 'speak' = o aluno falou; 'listen' = o aluno ouviu e respondeu. */
+    kind: text('kind').notNull(),
+    /** Frase-alvo (no idioma ensinado). */
+    target: text('target').notNull(),
+    /** O que o ASR entendeu da fala do aluno (null = sem voz/sem áudio). */
+    transcript: text('transcript'),
+    /** Score 0–1: pronúncia (speak) ou compreensão (listen). */
+    score: real('score'),
+    /** Skill afetada: 'speaking' | 'listening'. */
+    skill: text('skill').notNull(),
+    /** JSON de `PronunciationScore` (alinhamento, tags, confiança). */
+    metrics: text('metrics'),
+    /** Quem fez o trabalho: provedor de IA, síntese do sistema ou determinístico. */
+    source: text('source').notNull().default('provider'),
+    model: text('model'),
+    latencyMs: integer('latency_ms'),
+    createdAt: integer('created_at').notNull()
+  },
+  (t) => [index('speech_runs_profile_idx').on(t.profileId), index('speech_runs_lesson_idx').on(t.lessonId)]
+)
+
+/**
+ * V2 — cache de áudio TTS. É o mesmo princípio do cache de lição (M5): gerar uma
+ * vez, servir offline, nunca regastar token com a mesma frase.
+ */
+export const audioCache = sqliteTable('audio_cache', {
+  /** Chave estável: idioma + voz + modelo + texto normalizado. */
+  key: text('key').primaryKey(),
+  profileId: integer('profile_id')
+    .notNull()
+    .references(() => profiles.id, { onDelete: 'cascade' }),
+  kind: text('kind').notNull().default('tts'),
+  text: text('text').notNull(),
+  lang: text('lang').notNull(),
+  voice: text('voice'),
+  model: text('model'),
+  mime: text('mime').notNull().default('audio/wav'),
+  bytes: blob('bytes', { mode: 'buffer' }).notNull(),
+  durationMs: integer('duration_ms'),
+  schemaVersion: integer('schema_version').notNull().default(1),
+  createdAt: integer('created_at').notNull(),
+  lastUsedAt: integer('last_used_at').notNull().default(0),
+  hits: integer('hits').notNull().default(0)
 })
 
 export const settings = sqliteTable('settings', {

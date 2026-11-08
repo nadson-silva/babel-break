@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { asc, eq } from 'drizzle-orm'
 import Database from 'better-sqlite3'
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3'
 import { migrate } from 'drizzle-orm/better-sqlite3/migrator'
@@ -29,6 +30,9 @@ function migrationsFolder(): string {
 }
 
 const DB_FILE = 'language-teacher.db'
+
+/** Chave do ponteiro de perfil ativo em `settings` (v2). */
+const ACTIVE_PROFILE_KEY = 'activeProfile'
 
 function dbFiles(dir: string): string[] {
   return [DB_FILE, `${DB_FILE}-wal`, `${DB_FILE}-shm`]
@@ -166,10 +170,26 @@ export function closeDatabase(): void {
   db = null
 }
 
-export function getDefaultProfile(): schema.Profile {
+/**
+ * V2: quem está estudando agora. O ponteiro vive em `settings` (estado do
+ * aparelho, não do aluno) e é lido a cada chamada — nada de singleton de módulo
+ * segurando o perfil, porque trocar de perfil no meio de um job não pode herdar
+ * o anterior. A CRUD de perfis (criar/trocar/apagar) está em `main/profiles.ts`.
+ */
+export function activeProfile(): schema.Profile {
   const database = getDb()
-  const existing = database.select().from(schema.profiles).limit(1).get()
-  if (existing) return existing
+  const pointer = readActiveProfileId()
+
+  if (pointer != null) {
+    const row = database.select().from(schema.profiles).where(eq(schema.profiles.id, pointer)).get()
+    if (row) return row
+  }
+
+  const first = database.select().from(schema.profiles).orderBy(asc(schema.profiles.id)).limit(1).get()
+  if (first) {
+    writeActiveProfileId(first.id)
+    return first
+  }
 
   const created = database
     .insert(schema.profiles)
@@ -180,12 +200,47 @@ export function getDefaultProfile(): schema.Profile {
       cefr: null,
       focusMix: 0.3,
       prefs: null,
-      createdAt: Date.now()
+      createdAt: Date.now(),
+      lastUsedAt: Date.now()
     })
     .returning()
     .get()
 
+  writeActiveProfileId(created.id)
   return created
+}
+
+/**
+ * Id do perfil ativo sem materializar o perfil. `null` = ainda sem ponteiro
+ * válido (primeiro acesso ou ponteiro órfão).
+ */
+export function readActiveProfileId(): number | null {
+  const row = getDb().select().from(schema.settings).where(eq(schema.settings.key, ACTIVE_PROFILE_KEY)).get()
+  if (!row) return null
+  try {
+    const parsed = Number(JSON.parse(row.value) as unknown)
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export function writeActiveProfileId(profileId: number): void {
+  const now = Date.now()
+  const value = JSON.stringify(profileId)
+  getDb()
+    .insert(schema.settings)
+    .values({ key: ACTIVE_PROFILE_KEY, value, updatedAt: now })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: now } })
+    .run()
+}
+
+export function touchProfileUsed(profileId: number): void {
+  getDb()
+    .update(schema.profiles)
+    .set({ lastUsedAt: Date.now() })
+    .where(eq(schema.profiles.id, profileId))
+    .run()
 }
 
 export { schema }

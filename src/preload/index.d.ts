@@ -1,6 +1,8 @@
 import type {
   AppSettings,
+  CacheStats,
   ChatEvent,
+  CreateProfileInput,
   ConversationSummary,
   ConversationView,
   CurriculumView,
@@ -19,7 +21,10 @@ import type {
   PlacementResult,
   PlacementTest,
   ProfileState,
+  ProfileView,
+  ProfilesView,
   ProviderId,
+  UpdateProfileInput,
   ProviderStatus,
   PrewarmCycleOutcome,
   PrewarmState,
@@ -85,6 +90,17 @@ declare global {
         send(request: TutorSendRequest): Promise<TutorTurnResult>
         cancel(requestId: string): Promise<void>
         close(conversationId: number): Promise<RecapView>
+      }
+      /** V2: múltiplos perfis (criar, trocar, renomear, apagar). */
+      profiles: {
+        list(): Promise<ProfilesView>
+        switch(profileId: number): Promise<ProfilesView>
+        create(input?: CreateProfileInput): Promise<ProfileState>
+        update(input: UpdateProfileInput & { profileId?: number }): Promise<ProfileView>
+        remove(input: { profileId: number; acknowledged: true }): Promise<{
+          remaining: number
+          switchedTo: number | null
+        }>
       }
       review: {
         state(limit?: number): Promise<ReviewState>

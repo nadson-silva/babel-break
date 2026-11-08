@@ -26,8 +26,9 @@ import type {
 import { average, passRateFromReviews, roundedAverage, summarizeTime, toPercent } from '../core/dashboard'
 import type { CardPayload } from '../core/srs'
 import { cardRetention } from '../core/srs'
-import { getDb, getDefaultProfile, schema } from './db'
-import { profileView } from './learning'
+import { getDb, schema } from './db'
+import { activeProfileId, profileViewOf } from './profiles'
+
 import { activeTrackViews } from './tracks'
 import { reportsSummary } from './reports'
 import { cacheStats } from './prewarm'
@@ -60,6 +61,8 @@ function skillsOf(profileId: number): SkillEstimate[] {
 function lessonBlock(profileId: number): DashboardView['lessons'] {
   const db = getDb()
 
+  // V2 (C9): só as lições deste perfil — com dois alunos, a média de um não é a
+  // média do outro. E o `count(*)` da tabela inteira virava consulta por perfil.
   const totals = db
     .select({
       total: sql<number>`count(*)`,
@@ -67,6 +70,9 @@ function lessonBlock(profileId: number): DashboardView['lessons'] {
       prewarmed: sql<number>`sum(case when ${schema.lessons.prewarmedAt} is not null then 1 else 0 end)`
     })
     .from(schema.lessons)
+    .leftJoin(schema.units, eq(schema.units.id, schema.lessons.unitId))
+    .leftJoin(schema.focusTracks, eq(schema.focusTracks.id, schema.lessons.trackId))
+    .where(ownedLessons(profileId))
     .get()
 
   const progress = db
@@ -120,6 +126,8 @@ function timeBlock(profileId: number, now: number): DashboardView['time'] {
   const reviewTimes = db
     .select({ at: schema.reviews.reviewedAt })
     .from(schema.reviews)
+    .innerJoin(schema.cards, eq(schema.cards.id, schema.reviews.cardId))
+    .where(eq(schema.cards.profileId, profileId))
     .all()
     .map((row) => row.at)
 
@@ -268,6 +276,8 @@ function trackBlock(profileId: number): DashboardTrack[] {
     })
     .from(schema.scenarioRuns)
     .leftJoin(schema.lessons, eq(schema.lessons.id, schema.scenarioRuns.lessonId))
+    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.scenarioRuns.conversationId))
+    .where(eq(schema.conversations.profileId, profileId))
     .all()
 
   const lastOpened = db
@@ -300,10 +310,12 @@ function trackBlock(profileId: number): DashboardTrack[] {
   })
 }
 
-function scenarioBlock(): DashboardView['scenarios'] {
+function scenarioBlock(profileId: number): DashboardView['scenarios'] {
   const runs = getDb()
     .select({ contentScore: schema.scenarioRuns.contentScore, languageScore: schema.scenarioRuns.languageScore })
     .from(schema.scenarioRuns)
+    .innerJoin(schema.conversations, eq(schema.conversations.id, schema.scenarioRuns.conversationId))
+    .where(eq(schema.conversations.profileId, profileId))
     .all()
 
   return {
@@ -317,21 +329,27 @@ function scenarioBlock(): DashboardView['scenarios'] {
   }
 }
 
-export function dashboardView(now = Date.now()): DashboardView {
-  const profile = getDefaultProfile()
+/** Predicado de posse de lição: coluna da v2, com a cadeia antiga como fallback. */
+function ownedLessons(profileId: number) {
+  return sql`coalesce(${schema.lessons.profileId}, ${schema.units.profileId}, ${schema.focusTracks.profileId}) = ${profileId}`
+}
+
+export function dashboardView(now = Date.now(), profileId = activeProfileId()): DashboardView {
+  const profile = getDb().select().from(schema.profiles).where(eq(schema.profiles.id, profileId)).get()
+  if (!profile) throw new Error('Perfil não encontrado.')
 
   return {
     generatedAt: now,
-    profile: profileView(profile),
+    profile: profileViewOf(profile),
     skills: skillsOf(profile.id),
     lessons: lessonBlock(profile.id),
     time: timeBlock(profile.id, now),
     vocabulary: vocabularyBlock(profile.id, now),
     errors: errorBlock(profile.id),
     tracks: trackBlock(profile.id),
-    scenarios: scenarioBlock(),
+    scenarios: scenarioBlock(profile.id),
     reports: reportsSummary(profile.id, 8),
-    cache: cacheStats(),
+    cache: cacheStats(profile.id),
     ai: providerStatus()
   }
 }

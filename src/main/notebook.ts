@@ -10,8 +10,9 @@ import type { Correction, NotebookTag, NotebookView } from '../shared/types'
 import { errorFocus, type ErrorFocusEntry, type NotebookRow } from '../core/adapt'
 import { bankEntries } from '../core/interference'
 import type { ErrorHint } from '../core/prompts'
-import { getDefaultProfile, getDb, schema } from './db'
-import { profileInterferenceRules } from './locale'
+import { errorForProfile } from './scope'
+import { interferenceRulesForProfile, profileRow } from './locale'
+import { getDb, schema } from './db'
 
 type ErrorRow = typeof schema.errors.$inferSelect
 
@@ -141,7 +142,7 @@ export function focusFor(profileId: number, limit = 5): ErrorFocusEntry[] {
     .limit(60)
     .all()
 
-  const anchor = bankEntries(profileInterferenceRules())
+  const anchor = bankEntries(interferenceRulesForProfile(profileId))
   return errorFocus(rowsToNotebookRows(rows), limit, anchor)
 }
 
@@ -208,12 +209,12 @@ export function notebookView(profileId: number): NotebookView {
     .where(and(eq(schema.errors.profileId, profileId), eq(schema.errors.source, 'bank')))
     .get()?.value ?? 0
 
-  const bankRules = profileInterferenceRules()
-  const profile = getDefaultProfile()
+  const bankRules = interferenceRulesForProfile(profileId)
+  // V2: o banco de interferência é do par *deste* perfil — a UI diz isso com
+  // honestidade em vez de herdar o par do primeiro perfil do aparelho.
+  const profile = profileRow(profileId)
   const bankPair =
-    bankRules.length > 0
-      ? { native: profile.nativeLang, target: profile.targetLang }
-      : null
+    bankRules.length > 0 && profile ? { native: profile.nativeLang, target: profile.targetLang } : null
 
   return {
     tags,
@@ -226,7 +227,10 @@ export function notebookView(profileId: number): NotebookView {
   }
 }
 
-export function setErrorResolved(errorId: number, resolved: boolean): void {
+/** V2 (D2): marcar um erro como resolvido exige que a linha seja do perfil. */
+export function setErrorResolved(profileId: number, errorId: number, resolved: boolean): void {
+  if (!errorForProfile(errorId, profileId)) throw new Error('Erro não encontrado.')
+
   getDb()
     .update(schema.errors)
     .set({ resolvedAt: resolved ? Date.now() : null })

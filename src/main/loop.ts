@@ -14,7 +14,7 @@ import type {
   ReviewState,
   TutorSendRequest
 } from '../shared/types'
-import { getDefaultProfile } from './db'
+import { resolveProfileId } from './profiles'
 import {
   abandonGuidedSession,
   activeGuidedSession,
@@ -38,7 +38,8 @@ import {
 } from './tutor'
 
 function profileId(): number {
-  return getDefaultProfile().id
+  // V2: perfil ativo resolvido a cada chamada (nada de segurar a linha no módulo).
+  return resolveProfileId()
 }
 
 function emit(event: IpcMainInvokeEvent, payload: ChatEvent): void {
@@ -79,7 +80,7 @@ export function registerLoopIpc(): void {
   handle('notebook:get', (): NotebookView => notebookView(profileId()))
 
   handle('notebook:resolve', (_event, errorId: number, resolved: boolean) =>
-    setErrorResolved(errorId, resolved)
+    setErrorResolved(profileId(), errorId, resolved)
   )
 
   handle('notebook:resolve-tag', (_event, tags: string[]) => resolveTagErrors(profileId(), tags))

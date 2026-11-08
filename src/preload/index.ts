@@ -3,6 +3,7 @@ import type {
   AppSettings,
   CacheStats,
   ChatEvent,
+  CreateProfileInput,
   ConversationSummary,
   ConversationView,
   CurriculumView,
@@ -21,10 +22,13 @@ import type {
   PlacementResult,
   PlacementTest,
   ProfileState,
+  ProfileView,
+  ProfilesView,
   ProviderId,
+  ProviderStatus,
   PrewarmCycleOutcome,
   PrewarmState,
-  ProviderStatus,
+  UpdateProfileInput,
   RecapView,
   ReportInput,
   ReportKind,
@@ -123,6 +127,20 @@ const api = {
       ipcRenderer.invoke('guided:finish', input),
     abandon: (): Promise<void> => ipcRenderer.invoke('guided:abandon')
   },
+  /** V2: múltiplos perfis — listar, trocar, criar, renomear, apagar. */
+  profiles: {
+    list: (): Promise<ProfilesView> => ipcRenderer.invoke('profile:list'),
+    switch: (profileId: number): Promise<ProfilesView> => ipcRenderer.invoke('profile:switch', profileId),
+    create: (input: CreateProfileInput = {}): Promise<ProfileState> =>
+      ipcRenderer.invoke('profile:create', input),
+    update: (input: UpdateProfileInput & { profileId?: number }): Promise<ProfileView> =>
+      ipcRenderer.invoke('profile:update', input),
+    remove: (input: {
+      profileId: number
+      acknowledged: true
+    }): Promise<{ remaining: number; switchedTo: number | null }> =>
+      ipcRenderer.invoke('profile:delete', input)
+  },
   learning: {
     profile: {
       get: (): Promise<ProfileState> => ipcRenderer.invoke('profile:get'),
@@ -130,8 +148,7 @@ const api = {
         ipcRenderer.invoke('profile:onboard', input),
       /** Apaga a memória de aprendizado e volta ao estado de primeiro acesso. */
       resetMemory: (): Promise<ProfileState> => ipcRenderer.invoke('profile:reset-memory')
-    },
-    placement: {
+    },    placement: {
       generate: (
         input?: string | { goal?: string; targetLang?: string; nativeLang?: string }
       ): Promise<PlacementTest> => ipcRenderer.invoke('placement:generate', input),

@@ -55,8 +55,34 @@ export const en: Dictionary = {
     review: 'Review',
     notebook: 'Error notebook',
     progress: 'Progress',
+    profiles: 'Profiles',
     settings: 'Settings'
   },
+  profiles: {
+    title: 'Profiles',
+    subtitle: 'Each profile has its own language, error notebook, reviews and progress.',
+    empty: 'No profiles yet.',
+    active: 'In use',
+    notOnboarded: 'Setup pending',
+    manage: 'Manage profiles',
+    newProfile: 'New profile',
+    useProfile: 'Study with this profile',
+    rename: 'Rename',
+    delete: 'Delete',
+    confirmDelete: 'Delete for real',
+    deleteWarning:
+      'This deletes this learner\u2019s memory: lessons, error notebook, review cards, conversations and tracks. There is no undo \u2014 export first if you want to keep it.',
+    name: 'Profile name',
+    color: 'Color',
+    saveProfile: 'Save profile',
+    pair: 'Teaches {target} · explains in {native}',
+    lessons: 'Lessons done',
+    dueCards: 'Due cards',
+    openErrors: 'Open errors',
+    tracks: 'Active tracks',
+    help: 'Different profiles can teach different languages on the same machine. AI settings and the Gemini key belong to the app, not to a profile.'
+  },
+
   common: {
     save: 'Save changes',
     saving: 'Saving…',
@@ -70,6 +96,7 @@ export const en: Dictionary = {
     openSettings: 'Open settings',
     noModel: 'No model selected. Pick a model in Settings.',
     back: 'Back',
+    cancel: 'Cancel',
     skip: 'Skip this step',
     loading: 'Loading…'
   },
@@ -212,6 +239,7 @@ export const en: Dictionary = {
     of: 'of',
     next: 'Next',
     back: 'Back',
+    cancel: 'Cancel',
     finishTest: 'See result',
     testResult: 'Your estimated level',
     testResultBody: 'You got {correct} of {total}. We’ll start here and adjust as you practice.',

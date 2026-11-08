@@ -134,6 +134,10 @@ export type ExerciseType =
 
 export interface ProfileView {
   id: number
+  /** V2: identidade escolhida pelo usuário; sem nome a UI deriva do idioma-alvo. */
+  name: string | null
+  /** Chave de cor do avatar (ver `PROFILE_COLORS` no main). */
+  color: string | null
   targetLang: string
   nativeLang: string
   goal: string | null
@@ -141,6 +145,46 @@ export interface ProfileView {
   focusMix: number
   placementScore: number | null
   onboardingComplete: boolean
+  createdAt: number
+  lastUsedAt: number | null
+}
+
+/** V2: um perfil na lista do seletor/tela de perfis, com o peso da memória dele. */
+export interface ProfileSummary extends ProfileView {
+  /** Quantas lições concluídas (o rótulo "3 lições" do seletor). */
+  completedLessons: number
+  /** Cards na fila de revisão do perfil. */
+  dueCards: number
+  /** Erros abertos no caderno do perfil. */
+  openErrors: number
+  /** Trilhas ativas deste perfil. */
+  activeTracks: number
+  active: boolean
+}
+
+/** V2: payload de `profile:list` — a tela de perfis não consulta o banco. */
+export interface ProfilesView {
+  profiles: ProfileSummary[]
+  activeProfileId: number
+  colors: string[]
+  /** Perfil único = sem seletor na UI (v1 continua parecendo v1). */
+  multiProfile: boolean
+}
+
+export interface CreateProfileInput {
+  name?: string | null
+  color?: string | null
+  targetLang?: string
+  nativeLang?: string
+  goal?: string
+  cefr?: CefrLevel
+}
+
+export interface UpdateProfileInput {
+  name?: string | null
+  color?: string | null
+  goal?: string | null
+  focusMix?: number
 }
 
 export interface SkillEstimate {
@@ -162,6 +206,10 @@ export interface OnboardingInput {
   targetLang?: string
   /** M4: idioma das explicações (padrão 'pt-BR'). */
   nativeLang?: string
+  /** V2: nome do perfil criado no onboarding (o "Perfil da Ana"). */
+  name?: string | null
+  /** V2: cor do avatar escolhida no onboarding. */
+  color?: string | null
 }
 
 export interface PlacementQuestion {

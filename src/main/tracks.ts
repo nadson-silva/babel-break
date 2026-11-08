@@ -33,11 +33,15 @@ import {
   trackLessonLevel
 } from '../core/tracks'
 import { deterministicContentSupported } from '../core/languages'
-import { promptLocale, trackPlanPrompt } from '../core/prompts'
+import { trackPlanPrompt } from '../core/prompts'
 import { trackPlanSchema } from '../core/schemas'
 import { generateStructured } from './ai'
 import { emitStudentEvent } from './events'
-import { getDb, getDefaultProfile, schema } from './db'
+import { runtimeText } from '../core/runtime-text'
+import { getDb, schema } from './db'
+import { activeProfileId } from './profiles'
+import { localeFor, profileRow } from './locale'
+import { lessonForProfile, trackForProfile } from './scope'
 import { getSettings } from './settings'
 
 type TrackRow = typeof schema.focusTracks.$inferSelect
@@ -147,25 +151,32 @@ export interface LessonOwner {
   isScenario: boolean
 }
 
+/**
+ * Dono de uma lição: unidade do currículo base OU trilha de foco do perfil.
+ *
+ * V2: a posse é resolvida por `lessonForProfile` (coluna `lessons.profile_id`,
+ * com a cadeia antiga como fallback que se autoconserta), e os detalhes de
+ * unidade/trilha vêm sempre de linhas **do mesmo perfil**.
+ */
 export function ownerOfLesson(lessonId: number, profileId: number): LessonOwner | null {
-  const db = getDb()
-
-  const row = db.select().from(schema.lessons).where(eq(schema.lessons.id, lessonId)).get()
+  const row = lessonForProfile(lessonId, profileId)
   if (!row) return null
 
+  const db = getDb()
+
   if (row.unitId != null) {
-    const unit = db.select().from(schema.units).where(eq(schema.units.id, row.unitId)).get()
-    if (!unit || unit.profileId !== profileId) return null
+    const unit = db
+      .select()
+      .from(schema.units)
+      .where(and(eq(schema.units.id, row.unitId), eq(schema.units.profileId, profileId)))
+      .get()
+    if (!unit) return null
     return { unitId: unit.id, unitTitle: unit.title, trackId: null, trackTitle: null, isScenario: false }
   }
 
   if (row.trackId == null) return null
 
-  const track = db
-    .select()
-    .from(schema.focusTracks)
-    .where(and(eq(schema.focusTracks.id, row.trackId), eq(schema.focusTracks.profileId, profileId)))
-    .get()
+  const track = trackForProfile(row.trackId, profileId)
   if (!track) return null
 
   const view = trackView(track, profileId)
@@ -203,12 +214,7 @@ export function trackView(track: TrackRow, profileId: number): FocusTrackView {
 }
 
 function requireTrack(trackId: number, profileId: number): TrackRow {
-  const row = getDb()
-    .select()
-    .from(schema.focusTracks)
-    .where(and(eq(schema.focusTracks.id, trackId), eq(schema.focusTracks.profileId, profileId)))
-    .get()
-
+  const row = trackForProfile(trackId, profileId)
   if (!row) throw new Error('Trilha não encontrada.')
   return row
 }
@@ -249,9 +255,10 @@ export async function createTrackDraft(
   if (!objective) throw new Error('Escreva o que você quer praticar (ex.: entrevista para dev).')
 
   const db = getDb()
-  const profile = getDefaultProfile()
+  const profile = profileRow(profileId)
+  if (!profile) throw new Error('Perfil não encontrado.')
   const level = trackLessonLevel(clampLevel(profile.cefr))
-  const locale = promptLocale(profile.targetLang, profile.nativeLang)
+  const locale = localeFor(profile)
   const offlineReady = deterministicContentSupported(profile.targetLang)
 
   // "regerar esboço" reaproveita o rascunho em vez de acumular cópias — validado
@@ -274,8 +281,7 @@ export async function createTrackDraft(
   } catch (error) {
     if (!offlineReady) {
       throw new Error(
-        `A IA está indisponível e o banco de trilhas offline só cobre inglês. ` +
-          `Para montar uma trilha de ${locale.targetName}, configure um provedor em Configurações.`
+        runtimeText(profile.nativeLang, 'error.aiUnavailableTrack', { target: locale.targetName })
       )
     }
     console.warn(
@@ -371,7 +377,8 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
   const plan = parseTrackPlan(row)
   if (!plan || plan.lessons.length === 0) throw new Error('O esboço desta trilha está vazio.')
 
-  const studentProfile = getDefaultProfile()
+  const studentProfile = profileRow(profileId)
+  if (!studentProfile) throw new Error('Perfil não encontrado.')
   const level = trackLessonLevel(clampLevel(studentProfile.cefr))
   // O seed do banco local de cenário é em inglês (idioma-fixture). Para outro
   // idioma a persona nasce só pela IA na abertura — nunca um seed no idioma errado.
@@ -385,6 +392,8 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
         .values({
           unitId: null,
           trackId,
+          // V2: lição de trilha nasce sabendo de quem é.
+          profileId,
           title: lesson.title,
           objective: lesson.objective,
           level,
@@ -410,7 +419,7 @@ export function approveTrack(profileId: number, trackId: number): FocusTrackView
   })
 
   // Trilha aprovada = lições novas que o aluno provavelmente vai abrir: vale aquecer.
-  emitStudentEvent('track-approved', String(trackId))
+  emitStudentEvent('track-approved', String(trackId), profileId)
 
   return trackView(requireTrack(trackId, profileId), profileId)
 }
@@ -483,7 +492,7 @@ export function openTrackLessons(profileId: number): LessonSummary[] {
 
 /** Canais de trilha: rascunho → revisão → aprovação → arquivar. */
 export function registerTracksIpc(): void {
-  const profileId = (): number => getDefaultProfile().id
+  const profileId = (): number => activeProfileId()
 
   handle('track:list', () => tracksView(profileId()))
 
