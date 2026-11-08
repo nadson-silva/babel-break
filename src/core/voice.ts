@@ -66,9 +66,10 @@ export function resolveVoice(voice: string | null | undefined): string {
 }
 
 /**
- * Instrução de síntese. O texto do aluno vai entre aspas tipográficas para o
- * modelo não confundir instrução com fala, e o ritmo é pedido em inglês — o
- * idioma-alvo da frase não é declarado: o modelo detecta pela própria escrita.
+ * Instrução de síntese para os modelos **legados** (`*-preview-tts`: 2.5 e 3.1).
+ * O texto do aluno vai entre aspas tipográficas para o modelo não confundir
+ * instrução com fala, e o ritmo é pedido em inglês — o idioma-alvo da frase não
+ * é declarado: o modelo detecta pela própria escrita.
  */
 export function ttsInstruction(input: { text: string; rate: SpeechRate }): string {
   const rate =
@@ -85,6 +86,33 @@ export function ttsInstruction(input: { text: string; rate: SpeechRate }): strin
     rate,
     `Sentence: “${safe}”`
   ].join(' ')
+}
+
+/**
+ * A partir do Gemini 3.8 o contrato do TTS inverte: o texto é **transcrição
+ * literal** (direção de cena no corpo da frase sai falada em voz alta) e o modo
+ * de falar vai em `speechMetadata.style`, no próprio part.
+ *
+ * Distinguir pelo id é suficiente: os modelos que ainda aceitam instrução no
+ * texto são exatamente os que carregam `preview` no nome, e eles saem do ar em
+ * 17/11/2026.
+ */
+export function isVerbatimTtsModel(model: string | null | undefined): boolean {
+  const id = (model ?? '').trim().toLowerCase()
+  if (!id) return false
+  return !id.includes('preview-tts') && !id.includes('tts-preview')
+}
+
+/** Transcrição limpa para os modelos literais: as aspas ao redor não são fala. */
+export function ttsTranscript(text: string): string {
+  return text.replace(/[“”«»]/g, '').trim()
+}
+
+/** Estilo do turno (`speechMetadata.style`): ritmo e clareza, curado e em inglês. */
+export function ttsStyle(rate: SpeechRate): string {
+  if (rate === 'slow') return 'speaking slowly and very clearly, pausing between phrases'
+  if (rate === 'fast') return 'natural, slightly quick conversational pace'
+  return 'natural conversational pace, clearly'
 }
 
 /**

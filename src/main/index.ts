@@ -1,8 +1,8 @@
 import { app, BrowserWindow, dialog, shell } from 'electron'
-import type { Session } from 'electron'
 import path from 'node:path'
 import { closeDatabase, initDatabase } from './db'
 import { emitStudentEvent } from './events'
+import { grantMediaPermissions } from './media-permissions'
 import { registerIpcHandlers } from './ipc'
 import { startReminderWatch, stopReminderWatch } from './reminders'
 import { initLogging } from './log'
@@ -48,9 +48,10 @@ function createWindow(): void {
     return { action: 'deny' }
   })
 
-  // V2: o microfone é a única permissione que o app pede, e só para a própria
-  // janela (o renderer não carrega conteúdo remoto). Sem este handler o Chromium
-  // nega `media` em produção e a prática de voz morre em silêncio.
+  // V2: o microfone é a única permissão que o app pede, e só para a própria
+  // janela. O handler mora em `media-permissions.ts` (com teste) porque o formato
+  // do `details` muda entre versões do Electron, e negar em silêncio mata a
+  // prática de voz sem nenhum diálogo do sistema.
   grantMediaPermissions(mainWindow.webContents.session)
 
   const rendererUrl = process.env.ELECTRON_RENDERER_URL
@@ -59,30 +60,6 @@ function createWindow(): void {
   } else {
     void mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
-}
-
-/**
- * Libera `media` (microfone) para o renderer local. Qualquer outro origen é
- * negado — `setWindowOpenHandler` já manda links externos para o browser.
- */
-function grantMediaPermissions(session: Session): void {
-  const isLocalRenderer = (origin: unknown): boolean => {
-    if (typeof origin !== 'string' || !origin) return false
-    if (origin.startsWith('file://') || origin.startsWith('localhost') || origin.startsWith('127.0.0.1')) return true
-
-    const devUrl = process.env.ELECTRON_RENDERER_URL
-    if (!devUrl) return false
-    try {
-      return origin.startsWith(new URL(devUrl).origin)
-    } catch {
-      return false
-    }
-  }
-
-  session.setPermissionRequestHandler((_wc, permission, callback, details) => {
-    const origin = 'requestingOrigin' in details ? details.requestingOrigin : undefined
-    callback(permission === 'media' && isLocalRenderer(origin))
-  })
 }
 
 const gotLock = app.requestSingleInstanceLock()

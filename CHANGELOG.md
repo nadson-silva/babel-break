@@ -41,6 +41,11 @@ milestone do `PLAN.md`.
 - Escala de score única (D7): 0–1 no que é persistido, 0–5 só na estimativa.
 - Mensagens de chat/cenário/trilha no idioma de explicações do **perfil** (B8/D8),
   e `UI_LANGUAGES` checado contra os idiomas que o main sabe escrever.
+- Permissão de microfone no Electron 45: o handler lia `requestingOrigin` (campo do *check* handler) num `details` que traz
+  `securityOrigin`, então todo `getUserMedia` era negado em silêncio — `NotAllowedError: Permission denied`
+  no Linux, sem diálogo do sistema. Agora a origem sai de `securityOrigin` (com fallback pelo
+  `requestingUrl`), só áudio é concedido, e recusa vai para o `main.log`. Testes em
+  `main/media-permissions.test.ts`.
 
 ## [0.1.0] — M6 (pré-v2)
 

@@ -138,7 +138,7 @@ A voz depende do provedor, e o app diz qual metade existe em cada caso:
 
 | Provedor | Ouvir a frase | Falar e ser pontuado |
 | --- | --- | --- |
-| **Gemini** | ✅ TTS (`gemini-2.5-flash-preview-tts`, 30 vozes) | ✅ transcrição + score de pronúncia |
+| **Gemini** | ✅ TTS (`gemini-3.8-flash-tts`, 30 vozes) | ✅ transcrição + score de pronúncia |
 | **Ollama** | ⚠️ voz do sistema (se o SO tiver vozes) | ❌ sem ASR — nada de nota inventada |
 
 Como funciona o score: o áudio sai do navegador como **WAV PCM16 mono 16 kHz**, o provedor
